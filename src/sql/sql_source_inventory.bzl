@@ -265,6 +265,15 @@ SQL_UNITY_GROUPS = [
         external_srcs = [],
     ),
     struct(
+        name = "ob_sql_engine_file_scan",
+        language = "c++",
+        srcs = [
+            "src/sql/engine/file_scan/file_table_reader.cpp",
+            "src/sql/engine/file_scan/ob_csv_file_table_reader.cpp",
+            "src/sql/engine/file_scan/ob_glob_file_table_reader.cpp",
+        ],
+    ),
+    struct(
         name = "ob_sql_engine_cmd_0",
         language = "c++",
         srcs = [
@@ -462,6 +471,7 @@ SQL_UNITY_GROUPS = [
             "src/sql/engine/expr/ob_expr_subquery_ref.cpp",
             "src/sql/engine/expr/ob_expr_substr.cpp",
             "src/sql/engine/expr/ob_expr_generator_func.cpp",
+            "src/sql/engine/expr/ob_expr_file_table_func.cpp",
             "src/sql/engine/expr/ob_expr_zipf.cpp",
             "src/sql/engine/expr/ob_expr_uniform.cpp",
             "src/sql/engine/expr/ob_expr_normal.cpp",
