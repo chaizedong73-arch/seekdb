@@ -917,6 +917,12 @@ typedef enum ObItemType
   T_FUN_SYS_AI_RERANK = 2084,
   T_FUN_MD5_CNN_WS = 2085,
   T_FUN_SYS_BUCKET = 2086,
+  // file table functions, used in FROM clause: read_csv('x.csv') etc.
+  T_FUN_SYS_READ_CSV = 2090,
+  T_FUN_SYS_READ_JSON = 2091,
+  T_FUN_SYS_READ_NDJSON = 2092,
+  T_FUN_SYS_READ_PARQUET = 2093,
+  T_FUN_SYS_GLOB = 2094,
   T_MAX_OP = 3000,
 
   //pseudo column, to mark the group iterator id

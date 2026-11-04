@@ -291,7 +291,7 @@ END_P SET_VAR DELIMITER
         FIELD_OPTIONALLY_ENCLOSED_BY FIELD_DELIMITER FIELD_ENCLOSED_BY FILE_EXTENSION
 
         GENERAL GEOMETRY GEOMCOLLECTION GEOMETRYCOLLECTION GET_FORMAT GLOBAL GRANTS GROUP_CONCAT GROUPING
-        GLOBAL_ALIAS
+        GLOB GLOBAL_ALIAS
 
         HASH HEAP HELP HISTOGRAM HOUR HIDDEN HYBRID HYBRID_HIST HYBRID_SEARCH
 
@@ -337,7 +337,7 @@ END_P SET_VAR DELIMITER
         REPEATABLE RESET RESPECT RESTART RESTORE RESUME RETURNED_SQLSTATE RETURNS RETURNING REVERSE
         REWRITE ROLLBACK ROLLUP ROUTINE ROW ROWID ROW_COUNT ROW_FORMAT ROWS RTREE
         RUN RECYCLEBIN REPLICATION ROTATE ROW_NUMBER RUDUNDANT RECURSIVE RANDOM REDO_TRANSPORT_OPTIONS
-        RANK READ_ONLY RECOVERY REJECT ROLE
+        RANK READ_CSV READ_JSON READ_NDJSON READ_ONLY READ_PARQUET RECOVERY REJECT ROLE
 
         SAMPLE SAVEPOINT SCALARS SCHEMA_NAME SCN SCOPE SCORE SECOND SECURITY SEED
         SEMISTRUCT_ENCODING_TYPE SERIAL SERIALIZABLE SESSION SESSION_USER SET_TP SHARE SHARED SHUTDOWN SIGNED
@@ -374,6 +374,7 @@ END_P SET_VAR DELIMITER
 //-----------------------------non_reserved keyword end---------------------------------------------
 %type <node> sql_stmt stmt_list stmt opt_end_p
 %type <node> select_stmt update_stmt delete_stmt
+%type <node> copy_stmt file_table_expr file_table_fun
 %type <node> insert_stmt single_table_insert values_clause dml_table_name
 %type <node> create_table_stmt create_table_like_stmt fork_table_stmt fork_database_stmt diff_table_stmt merge_table_stmt opt_table_option_list table_option_list table_option table_option_list_space_seperated parallel_option lob_storage_clause lob_storage_parameter lob_storage_parameters lob_chunk_size
 %type <node> index_or_heap
@@ -557,6 +558,7 @@ opt_end_p:
 stmt:
     select_stmt             { $$ = $1; question_mark_issue($$, result); }
   | insert_stmt             { $$ = $1; question_mark_issue($$, result); }
+  | copy_stmt               { $$ = $1; question_mark_issue($$, result); }
   | create_table_stmt       {
     $$ = $1;
     ParseNode *parse_tree = $1;
@@ -8469,6 +8471,40 @@ select_no_parens into_clause
 }
 ;
 
+/* COPY (select ...) TO 'file' [FORMAT (...)] is desugared into
+ * a select statement with INTO OUTFILE clause, so that resolver and executor
+ * of SELECT ... INTO OUTFILE can be reused */
+copy_stmt:
+COPY select_with_parens TO STRING_VALUE
+{
+  ParseNode *outfile_node = NULL;
+  malloc_non_terminal_node(outfile_node, result->malloc_pool_, T_INTO_OUTFILE, 5,
+                           $4, NULL, NULL, NULL, NULL);
+  $$ = $2;
+  if (OB_NOT_NULL($$) && T_SELECT == $$->type_) {
+    $$->children_[PARSE_SELECT_INTO] = outfile_node;
+  } else {
+    yyerror(&@2, result, "COPY only supports a single select statement");
+    YYERROR;
+  }
+}
+| COPY select_with_parens TO STRING_VALUE FORMAT opt_equal_mark '(' external_file_format_list ')'
+{
+  ParseNode *format_list = NULL;
+  ParseNode *outfile_node = NULL;
+  merge_nodes(format_list, result, T_EXTERNAL_FILE_FORMAT, $8);
+  malloc_non_terminal_node(outfile_node, result->malloc_pool_, T_INTO_OUTFILE, 3,
+                           $4, format_list, NULL);
+  $$ = $2;
+  if (OB_NOT_NULL($$) && T_SELECT == $$->type_) {
+    $$->children_[PARSE_SELECT_INTO] = outfile_node;
+  } else {
+    yyerror(&@2, result, "COPY only supports a single select statement");
+    YYERROR;
+  }
+}
+;
+
 select_with_parens:
 '(' select_no_parens ')'      { $$ = $2; }
 | '(' select_with_parens ')'  { $$ = $2; }
@@ -11256,6 +11292,80 @@ relation_factor %prec LOWER_PARENS
 | TABLE '(' simple_expr ')' AS relation_name
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, $3, $6);
+}
+| file_table_expr %prec LOWER_PARENS
+{
+  $$ = $1;
+}
+| file_table_expr relation_name
+{
+  $$ = $1;
+  $$->children_[1] = $2;
+}
+| file_table_expr AS relation_name
+{
+  $$ = $1;
+  $$->children_[1] = $3;
+}
+;
+
+file_table_expr:
+file_table_fun %prec LOWER_PARENS
+{
+  $$ = $1;
+}
+;
+
+file_table_fun:
+READ_CSV '(' simple_expr ')'
+{
+  ParseNode *name_node = NULL;
+  ParseNode *params = NULL;
+  ParseNode *fun_node = NULL;
+  make_name_node(name_node, result->malloc_pool_, "read_csv");
+  malloc_non_terminal_node(params, result->malloc_pool_, T_EXPR_LIST, 1, $3);
+  malloc_non_terminal_node(fun_node, result->malloc_pool_, T_FUN_SYS, 2, name_node, params);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, fun_node, NULL);
+}
+| READ_JSON '(' simple_expr ')'
+{
+  ParseNode *name_node = NULL;
+  ParseNode *params = NULL;
+  ParseNode *fun_node = NULL;
+  make_name_node(name_node, result->malloc_pool_, "read_json");
+  malloc_non_terminal_node(params, result->malloc_pool_, T_EXPR_LIST, 1, $3);
+  malloc_non_terminal_node(fun_node, result->malloc_pool_, T_FUN_SYS, 2, name_node, params);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, fun_node, NULL);
+}
+| READ_NDJSON '(' simple_expr ')'
+{
+  ParseNode *name_node = NULL;
+  ParseNode *params = NULL;
+  ParseNode *fun_node = NULL;
+  make_name_node(name_node, result->malloc_pool_, "read_ndjson");
+  malloc_non_terminal_node(params, result->malloc_pool_, T_EXPR_LIST, 1, $3);
+  malloc_non_terminal_node(fun_node, result->malloc_pool_, T_FUN_SYS, 2, name_node, params);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, fun_node, NULL);
+}
+| READ_PARQUET '(' simple_expr ')'
+{
+  ParseNode *name_node = NULL;
+  ParseNode *params = NULL;
+  ParseNode *fun_node = NULL;
+  make_name_node(name_node, result->malloc_pool_, "read_parquet");
+  malloc_non_terminal_node(params, result->malloc_pool_, T_EXPR_LIST, 1, $3);
+  malloc_non_terminal_node(fun_node, result->malloc_pool_, T_FUN_SYS, 2, name_node, params);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, fun_node, NULL);
+}
+| GLOB '(' simple_expr ')'
+{
+  ParseNode *name_node = NULL;
+  ParseNode *params = NULL;
+  ParseNode *fun_node = NULL;
+  make_name_node(name_node, result->malloc_pool_, "glob");
+  malloc_non_terminal_node(params, result->malloc_pool_, T_EXPR_LIST, 1, $3);
+  malloc_non_terminal_node(fun_node, result->malloc_pool_, T_FUN_SYS, 2, name_node, params);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, fun_node, NULL);
 }
 ;
 
@@ -17662,6 +17772,7 @@ ACCOUNT
 |       FUNCTION
 |       FULL %prec HIGHER_PARENS
 |       GENERAL
+|       GLOB
 |       GEOMETRY
 |       GEOMCOLLECTION
 |       GEOMETRYCOLLECTION
@@ -17892,6 +18003,10 @@ ACCOUNT
 |       QUEUE_TIME
 |       QUICK
 |       RANK
+|       READ_CSV
+|       READ_JSON
+|       READ_NDJSON
+|       READ_PARQUET
 |       READ_ONLY
 |       RECOVER
 |       RECOVERY

@@ -37,6 +37,8 @@
 #include "sql/pl/ob_pl_build.h"
 #include "sql/rewrite/ob_transform_utils.h"
 #include "sql/engine/expr/ob_datum_cast.h"
+#include "sql/engine/expr/ob_expr_file_table_func.h"
+#include "sql/engine/file_scan/file_table_reader.h"
 #include "sql/resolver/dml/ob_inlist_resolver.h"
 #include "sql/engine/expr/ob_expr_cast.h"
 #include "sql/pl/ob_pl_dependency_util.h"
@@ -116,20 +118,81 @@ int ObResolverUtils::get_user_type(ObIAllocator *allocator,
   return ret;
 }
 
+static int get_file_table_column_names(const ObRawExpr *table_expr,
+                                       ObResolverParams &params,
+                                       ObIArray<ObString> &column_names)
+{
+  int ret = OB_SUCCESS;
+  CK (OB_NOT_NULL(table_expr));
+  CK (OB_NOT_NULL(params.allocator_));
+  CK (OB_LIKELY(table_expr->get_param_count() >= 1));
+  CK (OB_NOT_NULL(table_expr->get_param_expr(0)));
+  CK (OB_LIKELY(table_expr->get_param_expr(0)->is_const_raw_expr()));
+  if (OB_SUCC(ret)) {
+    const ObConstRawExpr *const_expr = static_cast<const ObConstRawExpr *>(
+        table_expr->get_param_expr(0));
+    const ObObj &path_obj = const_expr->get_value();
+    FileTableFormat format = FileTableFuncExpr::get_format_by_expr_type(
+        table_expr->get_expr_type());
+    if (OB_UNLIKELY(!path_obj.is_string())) {
+      ret = OB_INVALID_ARGUMENT;
+      LOG_USER_ERROR(OB_INVALID_ARGUMENT,
+          "path of file table function. The path should be a string");
+    } else if (OB_UNLIKELY(format >= FILE_TABLE_MAX_FORMAT)) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("invalid file table function type", K(ret));
+    } else {
+      ObString path = path_obj.get_string();
+      FileReadOptions options; // default read options for now
+      IFileTableReader *reader = NULL;
+      ObSEArray<FileColumnMeta, 16> col_metas;
+      if (OB_FAIL(create_file_table_reader(format, *params.allocator_, reader))) {
+        LOG_WARN("failed to create file table reader", K(ret));
+      } else if (OB_FAIL(reader->init(path, options))) {
+        LOG_WARN("failed to init file table reader", K(ret));
+      } else if (OB_FAIL(reader->get_column_metas(col_metas))) {
+        LOG_WARN("failed to get column metas", K(ret));
+      }
+      if (OB_NOT_NULL(reader)) {
+        reader->close();
+        reader->~IFileTableReader();
+        reader = NULL;
+      }
+      for (int64_t i = 0; OB_SUCC(ret) && i < col_metas.count(); ++i) {
+        ObString name;
+        if (OB_FAIL(ob_write_string(*params.allocator_, col_metas.at(i).name_, name))) {
+          LOG_WARN("failed to copy file table column name", K(ret));
+        } else if (OB_FAIL(column_names.push_back(name))) {
+          LOG_WARN("failed to push file table column name", K(ret));
+        }
+      }
+    }
+  }
+  return ret;
+}
+
 int ObResolverUtils::get_all_function_table_column_names(const TableItem &table_item,
                                                          ObResolverParams &params,
                                                          ObIArray<ObString> &column_names)
 {
   int ret = OB_SUCCESS;
   ObRawExpr *table_expr = NULL;
+  CK (OB_NOT_NULL(params.allocator_));
+  CK (OB_NOT_NULL(params.session_info_));
+  CK (OB_LIKELY(table_item.is_function_table()));
+  CK (OB_NOT_NULL(table_expr = table_item.function_table_expr_));
+  if (OB_SUCC(ret)
+      && FileTableFuncExpr::is_file_table_func_type(table_expr->get_expr_type())) {
+    // file table functions have no UDT, sample the column names from the file
+    OZ (get_file_table_column_names(table_expr, params, column_names));
+    return ret;
+  }
   ObPLPackageGuard *package_guard = nullptr;
   const ObUserDefinedType *user_type = NULL;
   ObExecContext *exec_ctx = params.session_info_->get_cur_exec_ctx();
   CK (OB_NOT_NULL(exec_ctx));
   OZ (exec_ctx->get_package_guard(package_guard));
   CK (OB_NOT_NULL(package_guard));
-  CK (OB_LIKELY(table_item.is_function_table()));
-  CK (OB_NOT_NULL(table_expr = table_item.function_table_expr_));
   CK (table_expr->get_udt_id() != OB_INVALID_ID);
 
   CK (OB_NOT_NULL(params.schema_checker_));
@@ -2654,6 +2717,9 @@ bool ObResolverUtils::is_expr_can_be_used_in_table_function(const ObRawExpr &exp
     bret = true;
   } else if (T_FUN_SYS_GENERATOR == expr.get_expr_type()) {
     // for generator(N) stream function
+    bret = true;
+  } else if (FileTableFuncExpr::is_file_table_func_type(expr.get_expr_type())) {
+    // for file table functions, e.g. read_csv('file.csv')
     bret = true;
   }
   return bret;

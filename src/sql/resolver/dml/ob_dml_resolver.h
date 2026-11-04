@@ -678,6 +678,8 @@ private:
                                              common::ObIArray<ColumnItem> &col_items);
   int resolve_function_table_column_item_sys_func(const TableItem &table_item,
                                                   common::ObIArray<ColumnItem> &col_items);
+  int resolve_function_table_column_item_file(const TableItem &table_item,
+                                              common::ObIArray<ColumnItem> &col_items);
   int check_table_exist_or_not(uint64_t &database_id,
                                common::ObString &table_name,
                                common::ObString &db_name);

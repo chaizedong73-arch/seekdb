@@ -1,0 +1,11 @@
+feat: AI function enhancement and file-table SQL framework skeleton
+
+Problem 1: AI_PROMPT JSON/text args and repeated placeholders, AI_EMBED
+dimension validation and batch eval, AI_COMPLETE config/empty-response
+checks, Ollama provider with empty access key, AI_RERANK stable global
+index mapping.
+
+Problem 2 skeleton: read_csv/read_json/read_ndjson/read_parquet/glob
+table functions, enable_file_sql system variable, secure_file_priv
+gating, dynamic column registration, streaming file table operator,
+COPY TO grammar, reader interface with CSV/GLOB stubs.

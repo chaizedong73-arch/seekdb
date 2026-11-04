@@ -190,6 +190,7 @@
 #include "sql/engine/expr/ob_expr_randstr.h"
 #include "sql/engine/expr/ob_expr_random.h"
 #include "sql/engine/expr/ob_expr_generator_func.h"
+#include "sql/engine/expr/ob_expr_file_table_func.h"
 #include "sql/engine/expr/ob_expr_zipf.h"
 #include "sql/engine/expr/ob_expr_normal.h"
 #include "sql/engine/expr/ob_expr_uniform.h"
@@ -900,6 +901,11 @@ void ObExprOperatorFactory::register_expr_operators()
     REG_OP(ObExprEncode);
     REG_OP(ObExprDecode);
     REG_OP(ObExprGeneratorFunc);
+    REG_OP(ReadCsvFuncExpr);
+    REG_OP(ReadJsonFuncExpr);
+    REG_OP(ReadNdjsonFuncExpr);
+    REG_OP(ReadParquetFuncExpr);
+    REG_OP(GlobFuncExpr);
     REG_OP(ObExprZipf);
     REG_OP(ObExprNormal);
     REG_OP(ObExprUniform);

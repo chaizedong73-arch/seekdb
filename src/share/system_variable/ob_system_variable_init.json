@@ -10975,5 +10975,20 @@
     "info_cn": "",
     "background_cn": "",
     "ref_url": ""
+  },
+  "enable_file_sql": {
+    "id": 10754,
+    "name": "enable_file_sql",
+    "default_value": "1",
+    "base_value": "1",
+    "data_type": "int",
+    "info": "enable file table sql, such as select * from read_csv('/path/a.csv')",
+    "flags": "GLOBAL|SESSION|INFLUENCE_PLAN",
+    "min_val": "0",
+    "max_val": "1",
+    "publish_version": "1.0.0.0",
+    "info_cn": "",
+    "background_cn": "",
+    "ref_url": ""
   }
 }
