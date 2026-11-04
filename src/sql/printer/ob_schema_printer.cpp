@@ -20,6 +20,7 @@
 #include "sql/resolver/expr/ob_raw_expr_util.h"
 
 #include "sql/resolver/ddl/ob_fts_index_builder_util.h"
+#include "share/schema/ob_ai_column_meta.h"
 
 namespace oceanbase
 {
@@ -29,6 +30,30 @@ namespace schema
 {
 using namespace std;
 using namespace common;
+
+static int print_ai_column_definition(const ObColumnSchemaV2 &col,
+                                      char *buf,
+                                      const int64_t buf_len,
+                                      int64_t &pos,
+                                      ObIAllocator &allocator)
+{
+  int ret = OB_SUCCESS;
+  ObString meta_str = col.get_cur_default_value().get_string();
+  if (meta_str.empty()) {
+    // legacy or corrupted AI column without meta json, nothing to print
+  } else {
+    AIColumnMeta ai_meta;
+    if (OB_FAIL(parse_ai_column_meta(allocator, meta_str, ai_meta))) {
+      SHARE_SCHEMA_LOG(WARN, "fail to parse ai column meta", K(ret), K(meta_str));
+    } else if (OB_FAIL(databuff_printf(buf, buf_len, pos, " AI COLUMN (%.*s)",
+                                       ai_meta.expr_.length(), ai_meta.expr_.ptr()))) {
+    } else if (OB_FAIL(databuff_printf(buf, buf_len, pos, " WITH (sync_mode='%.*s', max_retries=%ld)",
+                                       ai_meta.sync_mode_.length(), ai_meta.sync_mode_.ptr(),
+                                       ai_meta.max_retries_))) {
+    }
+  }
+  return ret;
+}
 
 /*-----------------------------------------------------------------------------
  *  ObSchemaPrinter
@@ -213,6 +238,11 @@ int ObSchemaPrinter::print_table_definition_columns(const ObTableSchema &table_s
           if (OB_FAIL(print_generated_column_definition(*col, buf, buf_len, table_schema, pos))) {
           }
         }
+        if (OB_SUCC(ret) && col->is_ai_column()) {
+          if (OB_FAIL(print_ai_column_definition(*col, buf, buf_len, pos, allocator))) {
+            SHARE_SCHEMA_LOG(WARN, "fail to print ai column definition", K(ret), K(*col));
+          }
+        }
         // mysql mode
         if (OB_SUCC(ret)) {
           if (!col->is_nullable()) {
@@ -232,7 +262,7 @@ int ObSchemaPrinter::print_table_definition_columns(const ObTableSchema &table_s
             SHARE_SCHEMA_LOG(WARN, "fail to print geometry srid", K(ret), K(srid));
           }
         }
-        if (OB_SUCC(ret) && !col->is_generated_column()) {
+        if (OB_SUCC(ret) && !col->is_generated_column() && !col->is_ai_column()) {
           //if column is not permit null and default value does not specify , don't  display DEFAULT NULL
           if (OB_SUCC(ret)) {
             if (!(ObNullType == col->get_cur_default_value().get_type() && !col->is_nullable())

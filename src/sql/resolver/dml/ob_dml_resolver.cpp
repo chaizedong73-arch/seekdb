@@ -1984,7 +1984,11 @@ int ObDMLResolver::resolve_basic_column_item(const TableItem &table_item,
       bool is_lob_column = is_lob_storage(col_schema->get_data_type());
       col_expr->set_lob_column(is_lob_column);
       column_item.expr_ = col_expr;
-      if (session_info_->get_ddl_info().is_ddl()) {
+      if (col_schema->is_ai_column()) {
+        // The default value of an AI column is its serialized definition, never
+        // an insertable value. Unspecified AI columns are filled with NULL.
+        column_item.set_default_value(ObObj());
+      } else if (session_info_->get_ddl_info().is_ddl()) {
         column_item.set_default_value(col_schema->get_orig_default_value());
       } else {
         column_item.set_default_value(col_schema->get_cur_default_value());

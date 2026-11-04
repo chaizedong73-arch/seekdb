@@ -87,6 +87,7 @@ public:
   int resolve_alter_table_force(const ParseNode &node);
   int resolve_drop_unused_columns(const ParseNode &node);
   int resolve_rename_column(const ParseNode &node);
+  int resolve_retry_ai_column(const ParseNode &node);
   int fill_table_option(const share::schema::ObTableSchema *table_schema);
   //save table option to AlterTableArg
   int set_table_options();

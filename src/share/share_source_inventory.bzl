@@ -95,6 +95,7 @@ SHARE_UNITY_GROUPS = [
         language = "c++",
         srcs = [
             "src/share/ob_autoincrement_param.cpp",
+            "src/share/ob_ai_column_service.cpp",
             "src/share/ob_autoincrement_service.cpp",
             "src/share/ob_column_checksum_error_operator.cpp",
             "src/share/ob_core_table_proxy.cpp",
@@ -388,6 +389,7 @@ SHARE_UNITY_GROUPS = [
         name = "ob_share_schema_0",
         language = "c++",
         srcs = [
+            "src/share/schema/ob_ai_column_meta.cpp",
             "src/share/schema/ob_col_desc.cpp",
             "src/share/schema/ob_column_schema.cpp",
             "src/share/schema/ob_constraint.cpp",

@@ -17,6 +17,12 @@
 #define USING_LOG_PREFIX SERVER_OMT
 
 
+<<<<<<< HEAD
+=======
+#include "share/ob_server_struct.h"
+#include "share/ob_ai_column_service.h"
+#include "rust/config.h"
+>>>>>>> 9ccb288f3 (feat: async AI COLUMN (DDL, DML linkage, worker service, retry, strict read))
 #include "lib/stat/ob_diagnostic_info_guard.h"
 #include "ob_server_runtime_controller.h"
 #include "storage/tx_storage/ob_memstore_freezer.h"
@@ -1538,6 +1544,10 @@ int ObServer::obs_init_modules()
   if (OB_SUCC(ret) && OB_FAIL(rootserver::ObSystemPackageLoadService::server_module_init(mods_system_package_load_service_))) { SERVER_LOG(WARN, "mods_system_package_load_service_ fail", KR(ret)); }
   if (OB_SUCC(ret) && OB_FAIL(rootserver::ObDDLScheduler::server_module_init(mods_ddl_scheduler_))) { SERVER_LOG(WARN, "mods_ddl_scheduler_ fail", KR(ret)); }
   if (OB_SUCC(ret) && OB_FAIL(ObAiService::server_module_init(mods_ai_service_))) { SERVER_LOG(WARN, "mods_ai_service_ fail", KR(ret)); }
+  if (OB_SUCC(ret) && OB_NOT_NULL(GCTX.sql_proxy_)
+      && OB_FAIL(share::AIColumnService::get_instance().start_if_needed(*GCTX.sql_proxy_))) {
+    SERVER_LOG(WARN, "fail to start ai column service", KR(ret));
+  }
   if (OB_SUCC(ret) && OB_FAIL(ObChangeStreamMgr::server_module_init(
       mods_change_stream_mgr_,
       *mods_log_storage_adapter_,

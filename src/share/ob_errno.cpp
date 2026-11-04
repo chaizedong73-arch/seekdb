@@ -13904,6 +13904,27 @@ static const _error _error_OB_AI_FUNC_MODEL_EXISTS = {
       .str_error             = "This ai model is already exists",
       .str_user_error        = "This ai model \'%.*s\' is already exists"
 };
+static const _error _error_OB_ERR_AI_COLUMN_NOT_READY = {
+      .error_name            = "OB_ERR_AI_COLUMN_NOT_READY",
+      .mysql_errno           = -1,
+      .sqlstate              = "HY000",
+      .str_error             = "AI column value is not ready",
+      .str_user_error        = "AI column \'%.*s\' is not ready, its value is still being computed by AI"
+};
+static const _error _error_OB_ERR_AI_COLUMN_DIRECT_ASSIGN = {
+      .error_name            = "OB_ERR_AI_COLUMN_DIRECT_ASSIGN",
+      .mysql_errno           = -1,
+      .sqlstate              = "HY000",
+      .str_error             = "Cannot assign value to AI column directly",
+      .str_user_error        = "Cannot assign value to AI column \'%.*s\' directly, it is computed by AI asynchronously"
+};
+static const _error _error_OB_ERR_AI_COLUMN_NOT_EXISTS = {
+      .error_name            = "OB_ERR_AI_COLUMN_NOT_EXISTS",
+      .mysql_errno           = -1,
+      .sqlstate              = "HY000",
+      .str_error             = "AI column does not exist",
+      .str_user_error        = "AI column \'%.*s\' does not exist in table \'%.*s\' or is not an AI column"
+};
 static const _error _error_OB_CLOB_ONLY_SUPPORT_WITH_MULTIBYTE_FUN = {
       .error_name            = "OB_CLOB_ONLY_SUPPORT_WITH_MULTIBYTE_FUN",
       .error_cause           = "Internal Error",
@@ -15497,6 +15518,9 @@ struct ObStrErrorInit
     _errors[-OB_AI_FUNC_PARAM_TYPE_INVALID] = &_error_OB_AI_FUNC_PARAM_TYPE_INVALID;
     _errors[-OB_AI_FUNC_MODEL_NOT_FOUND] = &_error_OB_AI_FUNC_MODEL_NOT_FOUND;
     _errors[-OB_AI_FUNC_MODEL_EXISTS] = &_error_OB_AI_FUNC_MODEL_EXISTS;
+    _errors[-OB_ERR_AI_COLUMN_NOT_READY] = &_error_OB_ERR_AI_COLUMN_NOT_READY;
+    _errors[-OB_ERR_AI_COLUMN_DIRECT_ASSIGN] = &_error_OB_ERR_AI_COLUMN_DIRECT_ASSIGN;
+    _errors[-OB_ERR_AI_COLUMN_NOT_EXISTS] = &_error_OB_ERR_AI_COLUMN_NOT_EXISTS;
     _errors[-OB_CLOB_ONLY_SUPPORT_WITH_MULTIBYTE_FUN] = &_error_OB_CLOB_ONLY_SUPPORT_WITH_MULTIBYTE_FUN;
     _errors[-OB_ERR_UPDATE_TWICE] = &_error_OB_ERR_UPDATE_TWICE;
     _errors[-OB_ERR_SNAPSHOT_QUERY_WITH_UPDATE] = &_error_OB_ERR_SNAPSHOT_QUERY_WITH_UPDATE;

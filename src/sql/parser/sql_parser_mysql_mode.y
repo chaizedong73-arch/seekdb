@@ -336,7 +336,7 @@ END_P SET_VAR DELIMITER
         REPEATABLE RESET RESPECT RESTART RESTORE RESUME RETURNED_SQLSTATE RETURNS RETURNING REVERSE
         REWRITE ROLLBACK ROLLUP ROUTINE ROW ROWID ROW_COUNT ROW_FORMAT ROWS RTREE
         RUN RECYCLEBIN REPLICATION ROTATE ROW_NUMBER RUDUNDANT RECURSIVE RANDOM REDO_TRANSPORT_OPTIONS
-        RANK READ_CSV READ_JSON READ_NDJSON READ_ONLY READ_PARQUET RECOVERY REJECT ROLE
+        RANK READ_CSV READ_JSON READ_NDJSON READ_ONLY READ_PARQUET RECOVERY REJECT ROLE RETRY
 
         SAMPLE SAVEPOINT SCALARS SCHEMA_NAME SCN SCOPE SCORE SECOND SECURITY SEED
         SEMISTRUCT_ENCODING_TYPE SERIAL SERIALIZABLE SESSION SESSION_USER SET_TP SHARE SHARED SHUTDOWN SIGNED
@@ -396,6 +396,7 @@ END_P SET_VAR DELIMITER
 %type <node> update_basic_stmt delete_basic_stmt
 %type <node> table_element_list table_element column_definition column_definition_ref column_definition_list column_name_list
 %type <node> opt_generated_keyname opt_generated_option_list opt_generated_column_attribute_list generated_column_attribute opt_storage_type
+%type <node> opt_ai_column_with ai_column_option_list ai_column_option opt_retry_where
 %type <node> data_type special_table_type opt_if_not_exists opt_if_exists opt_charset collation opt_collation cast_data_type
 %type <node> replace_with_opt_hint insert_with_opt_hint column_list opt_on_duplicate_key_clause opt_into opt_replace opt_temporary no_param_column_ref
 %type <node> insert_vals_list insert_vals value_or_values opt_insert_row_alias
@@ -4851,7 +4852,16 @@ column_definition_ref data_type opt_column_attribute_list opt_column_reference o
   merge_nodes(attributes, result, T_COLUMN_ATTRIBUTES, $10);
   malloc_non_terminal_node($$, result->malloc_pool_, T_COLUMN_DEFINITION, 7, $1, $2, attributes, $7, $9, $12, $4);
 }
-| column_definition_ref SERIAL opt_column_attribute_list opt_position_column 
+| column_definition_ref data_type opt_collation AI COLUMN '(' expr ')' opt_ai_column_with opt_position_column
+{
+  (void)($9);
+  ParseNode *attributes = NULL;
+  set_data_type_collation($2, $3, true, false);
+  dup_expr_string($7, result, @7.first_column, @7.last_column);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_COLUMN_DEFINITION, 7, $1, $2, attributes, $7, $8, NULL, NULL);
+  $$->children_[5] = $9;
+}
+| column_definition_ref SERIAL opt_column_attribute_list opt_position_column
 {
   ParseNode *unsigned_bigint_type = NULL;
   ParseNode *not_null_attr = NULL;
@@ -4927,6 +4937,72 @@ opt_generated_option_list:
 ALWAYS
 {
   malloc_terminal_node($$, result->malloc_pool_, T_CONSTR_ALWAYS);
+}
+;
+
+opt_ai_column_with:
+/*empty*/
+{
+  $$ = NULL;
+}
+| WITH '(' ai_column_option_list ')'
+{
+  $$ = $3;
+}
+;
+
+opt_retry_where:
+/*empty*/
+{
+  $$ = NULL;
+}
+| WHERE expr
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_RETRY_WHERE_CLAUSE, 1, $2);
+  check_ret(setup_token_pos_info_and_dup_string($$, result, @2.first_column, @2.last_column), &@1, result);
+}
+;
+
+ai_column_option_list:
+ai_column_option
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN_OPTIONS, 2, NULL, NULL);
+  if (NULL != $1) {
+    if (T_STRING == $1->type_) {
+      $$->children_[0] = $1;
+    } else {
+      $$->children_[1] = $1;
+    }
+  }
+}
+| ai_column_option_list ',' ai_column_option
+{
+  ParseNode *options = $1;
+  if (NULL != $3) {
+    if (T_STRING == $3->type_) {
+      options->children_[0] = $3;
+    } else {
+      options->children_[1] = $3;
+    }
+  }
+  $$ = options;
+}
+;
+
+ai_column_option:
+NAME_OB '=' STRING_VALUE
+{
+  (void)($2);
+  $1->type_ = T_STRING;
+  $1->str_value_ = $3->str_value_;
+  $$ = $1;
+}
+| NAME_OB '=' INT_VALUE
+{
+  (void)($2);
+  $1->type_ = T_INT;
+  $1->value_ = $3->value_;
+  $$ = $1;
 }
 ;
 
@@ -14833,6 +14909,12 @@ opt_set table_option_list_space_seperated
 | alter_foreign_key_action
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_ALTER_FOREIGN_KEY_OPTION, 1, $1);
+}
+| RETRY AI COLUMN column_name opt_retry_where
+{
+  ParseNode *retry_node = NULL;
+  malloc_non_terminal_node(retry_node, result->malloc_pool_, T_RETRY_AI_COLUMN, 2, $4, $5);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_ALTER_TABLE_OPTION, 1, retry_node);
 }
 |
 DROP CONSTRAINT constraint_name
