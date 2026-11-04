@@ -40,6 +40,8 @@
 #include "sql/resolver/dcl/ob_dcl_resolver.h"
 #include "sql/resolver/ddl/ob_ddl_resolver.h"
 #include "sql/hybrid_search/ob_hybrid_search_executor.h"
+#include "sql/engine/expr/ob_expr_file_table_func.h"
+#include "sql/engine/file_scan/file_table_reader.h"
 
 namespace oceanbase
 {
@@ -7864,8 +7866,116 @@ int ObDMLResolver::resolve_function_table_column_item(const TableItem &table_ite
   if (OB_SUCC(ret)) {
     if (table_item.function_table_expr_->get_result_type().is_ext()) {
       ret = resolve_function_table_column_item_udf(table_item, col_items);
+    } else if (FileTableFuncExpr::is_file_table_func_type(
+                   table_item.function_table_expr_->get_expr_type())) {
+      ret = resolve_function_table_column_item_file(table_item, col_items);
     } else {
       ret = resolve_function_table_column_item_sys_func(table_item, col_items);
+    }
+  }
+  return ret;
+}
+
+int ObDMLResolver::resolve_function_table_column_item_file(const TableItem &table_item,
+                                                           ObIArray<ColumnItem> &col_items)
+{
+  INIT_SUCC(ret);
+  const ObRawExpr *function_table_expr = table_item.function_table_expr_;
+  CK (OB_LIKELY(table_item.is_function_table()));
+  CK (OB_NOT_NULL(function_table_expr));
+  CK (OB_NOT_NULL(session_info_));
+  CK (OB_NOT_NULL(allocator_));
+  // 1. check enable_file_sql
+  int64_t enable_file_sql = 0;
+  if (OB_FAIL(ret)) {
+  } else if (OB_FAIL(session_info_->get_sys_variable(SYS_VAR_ENABLE_FILE_SQL, enable_file_sql))) {
+    LOG_WARN("failed to get sys variable enable_file_sql", K(ret));
+  } else if (enable_file_sql <= 0) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED,
+        "file table sql. Please set enable_file_sql to ON first");
+  }
+  // 2. extract the constant path from the first argument
+  ObString path;
+  FileTableFormat format = FileTableFuncExpr::get_format_by_expr_type(
+      function_table_expr->get_expr_type());
+  if (OB_FAIL(ret)) {
+  } else if (OB_UNLIKELY(function_table_expr->get_param_count() < 1)
+             || OB_ISNULL(function_table_expr->get_param_expr(0))) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("file table function should have one path argument", K(ret));
+  } else if (OB_UNLIKELY(!function_table_expr->get_param_expr(0)->is_const_raw_expr())) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_USER_ERROR(OB_INVALID_ARGUMENT,
+        "path of file table function. The path should be a constant string");
+  } else {
+    const ObConstRawExpr *const_expr = static_cast<const ObConstRawExpr *>(
+        function_table_expr->get_param_expr(0));
+    const ObObj &path_obj = const_expr->get_value();
+    if (OB_UNLIKELY(!path_obj.is_string())) {
+      ret = OB_INVALID_ARGUMENT;
+      LOG_USER_ERROR(OB_INVALID_ARGUMENT,
+          "path of file table function. The path should be a string");
+    } else {
+      path = path_obj.get_string();
+    }
+  }
+  // 3. check secure_file_priv
+  if (OB_FAIL(ret)) {
+  } else {
+    ObString secure_file_priv;
+    ObString check_path = path;
+    if (OB_FAIL(session_info_->get_sys_variable(SYS_VAR_SECURE_FILE_PRIV, secure_file_priv))) {
+      LOG_WARN("failed to get sys variable secure_file_priv", K(ret));
+    } else if (FILE_TABLE_GLOB == format) {
+      // glob pattern: check its directory prefix only
+      int64_t sep_pos = -1;
+      for (int64_t i = path.length() - 1; i >= 0; --i) {
+        if ('/' == *(path.ptr() + i) || '\\' == *(path.ptr() + i)) {
+          sep_pos = i;
+          break;
+        }
+      }
+      if (sep_pos > 0) {
+        check_path.assign_ptr(path.ptr(), static_cast<int32_t>(sep_pos));
+      }
+    }
+    if (OB_FAIL(ret)) {
+    } else if (OB_FAIL(ObResolverUtils::check_secure_path(secure_file_priv, check_path))) {
+      LOG_WARN("path is not allowed by secure_file_priv", K(check_path), K(ret));
+    }
+  }
+  // 4. create reader and sample the schema of the file table
+  ObSEArray<FileColumnMeta, 16> col_metas;
+  if (OB_FAIL(ret)) {
+  } else {
+    FileReadOptions options; // default options for now
+    IFileTableReader *reader = NULL;
+    if (OB_FAIL(create_file_table_reader(format, *allocator_, reader))) {
+      LOG_WARN("failed to create file table reader", K(format), K(ret));
+    } else if (OB_FAIL(reader->init(path, options))) {
+      LOG_WARN("failed to init file table reader", K(path), K(ret));
+    } else if (OB_FAIL(reader->get_column_metas(col_metas))) {
+      LOG_WARN("failed to get column metas", K(path), K(ret));
+    }
+    if (OB_NOT_NULL(reader)) {
+      reader->close();
+      reader->~IFileTableReader();
+      reader = NULL;
+    }
+  }
+  // 5. register dynamic columns into the function table
+  if (OB_SUCC(ret)) {
+    for (int64_t i = 0; OB_SUCC(ret) && i < col_metas.count(); ++i) {
+      const FileColumnMeta &col_meta = col_metas.at(i);
+      ObAccuracy accuracy(static_cast<ObLength>(OB_MAX_VARCHAR_LENGTH));
+      ColumnItem *col_item = NULL;
+      if (OB_FAIL(resolve_function_table_column_item(table_item, col_meta.type_, accuracy,
+              col_meta.name_, OB_APP_MIN_COLUMN_ID + i, col_item))) {
+        LOG_WARN("failed to resolve file table column item", K(col_meta.name_), K(ret));
+      } else if (OB_FAIL(col_items.push_back(*col_item))) {
+        LOG_WARN("failed to push column item", K(ret));
+      }
     }
   }
   return ret;

@@ -19,6 +19,7 @@
 #include "sql/engine/basic/ob_function_table_op.h"
 #include "sql/engine/ob_exec_context.h"
 #include "sql/engine/expr/ob_expr_lob_utils.h"
+#include "sql/engine/expr/ob_expr_file_table_func.h"
 
 
 namespace oceanbase
@@ -39,8 +40,16 @@ int ObFunctionTableOp::inner_open()
     LOG_WARN("value expr is not init", K(ret));
   } else if (ObExtendType == MY_SPEC.value_expr_->datum_meta_.type_) {
     next_row_func_ = &ObFunctionTableOp::inner_get_next_row_udf;
+  } else if (FileTableFuncExpr::is_file_table_func_type(MY_SPEC.value_expr_->type_)) {
+    next_row_func_ = &ObFunctionTableOp::inner_get_next_row_file;
   } else {
     next_row_func_ = &ObFunctionTableOp::inner_get_next_row_sys_func;
+  }
+  if (OB_SUCC(ret)
+      && FileTableFuncExpr::is_file_table_func_type(MY_SPEC.value_expr_->type_)) {
+    if (OB_FAIL(init_file_table_reader())) {
+      LOG_WARN("failed to init file table reader", K(ret));
+    }
   }
   return ret;
 }
@@ -57,6 +66,26 @@ int ObFunctionTableOp::inner_rescan()
       value_table_ = NULL;
       already_calc_ = false;
     }
+    // for file table: rewind or re-init the reader when the file is changed
+    if (OB_SUCC(ret) && OB_NOT_NULL(file_reader_)
+        && FileTableFuncExpr::is_file_table_func_type(MY_SPEC.value_expr_->type_)) {
+      FileTableFileStat cur_stat;
+      bool file_changed = false;
+      if (OB_FAIL(file_reader_->get_file_stat(cur_stat))) {
+        LOG_WARN("failed to get file stat on rescan", K(ret));
+      } else if (cur_stat != file_stat_) {
+        file_changed = true;
+      }
+      if (OB_SUCC(ret)) {
+        if (file_changed) {
+          if (OB_FAIL(init_file_table_reader())) {
+            LOG_WARN("failed to re-init file table reader on rescan", K(ret));
+          }
+        } else if (OB_FAIL(file_reader_->reuse())) {
+          LOG_WARN("failed to reuse file table reader on rescan", K(ret));
+        }
+      }
+    }
   }
   return ret;
 }
@@ -68,12 +97,115 @@ int ObFunctionTableOp::inner_close()
   row_count_ = 0;
   col_count_ = 0;
   value_table_ = NULL;
+  if (OB_NOT_NULL(file_reader_)) {
+    file_reader_->close();
+  }
   return ret;
 }
 
 void ObFunctionTableOp::destroy()
 {
+  if (OB_NOT_NULL(file_reader_)) {
+    file_reader_->close();
+    file_reader_->~IFileTableReader();
+    file_reader_ = NULL;
+  }
   ObOperator::destroy();
+}
+
+int ObFunctionTableOp::init_file_table_reader()
+{
+  int ret = OB_SUCCESS;
+  ObExpr *value_expr = MY_SPEC.value_expr_;
+  CK (OB_NOT_NULL(value_expr));
+  if (OB_SUCC(ret)) {
+    FileTableFormat format = FileTableFuncExpr::get_format_by_expr_type(value_expr->type_);
+    if (OB_UNLIKELY(format >= FILE_TABLE_MAX_FORMAT)) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("invalid file table function type", K(value_expr->type_), K(ret));
+    } else if (OB_UNLIKELY(value_expr->arg_cnt_ < 1) || OB_ISNULL(value_expr->args_[0])) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("file table function should have a path argument", K(value_expr->arg_cnt_), K(ret));
+    } else {
+      // the path argument is a constant string
+      ObDatum *path_datum = NULL;
+      if (OB_FAIL(value_expr->args_[0]->eval(eval_ctx_, path_datum))) {
+        LOG_WARN("failed to eval path expr of file table function", K(ret));
+      } else if (OB_ISNULL(path_datum) || path_datum->is_null()) {
+        ret = OB_INVALID_ARGUMENT;
+        LOG_USER_ERROR(OB_INVALID_ARGUMENT, "path of file table function");
+      } else {
+        ObString path = path_datum->get_string();
+        FileReadOptions options; // default read options for now
+        if (OB_NOT_NULL(file_reader_)) {
+          file_reader_->close();
+        }
+        if (OB_FAIL(create_file_table_reader(format, ctx_.get_allocator(), file_reader_))) {
+          LOG_WARN("failed to create file table reader", K(format), K(ret));
+        } else if (OB_FAIL(file_reader_->init(path, options))) {
+          LOG_WARN("failed to init file table reader", K(path), K(ret));
+        } else if (OB_FAIL(file_reader_->get_file_stat(file_stat_))) {
+          LOG_WARN("failed to get file stat", K(path), K(ret));
+        } else if (OB_UNLIKELY(MY_SPEC.column_exprs_.count() < 1)) {
+          ret = OB_ERR_UNEXPECTED;
+          LOG_WARN("file table has no column", K(MY_SPEC.column_exprs_.count()), K(ret));
+        }
+      }
+    }
+  }
+  return ret;
+}
+
+int ObFunctionTableOp::inner_get_next_row_file()
+{
+  int ret = OB_SUCCESS;
+  clear_evaluated_flag();
+  if (OB_ISNULL(file_reader_)) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("file table reader is not inited", K(ret));
+  } else if (OB_FAIL(ctx_.check_status())) {
+  } else {
+    bool has_next = false;
+    file_row_.reuse();
+    if (OB_FAIL(file_reader_->get_next_row(file_row_, has_next))) {
+      LOG_WARN("failed to get next row from file table reader", K(ret));
+    } else if (!has_next) {
+      ret = OB_ITER_END;
+    } else if (OB_FAIL(write_file_row_to_columns(file_row_))) {
+      LOG_WARN("failed to write file row to columns", K(ret));
+    }
+  }
+  return ret;
+}
+
+int ObFunctionTableOp::write_file_row_to_columns(const ObIArray<ObObj> &row)
+{
+  int ret = OB_SUCCESS;
+  if (OB_UNLIKELY(MY_SPEC.column_exprs_.count() != row.count())) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("file row column count mismatch",
+             K(MY_SPEC.column_exprs_.count()), K(row.count()), K(ret));
+  } else {
+    for (int64_t i = 0; OB_SUCC(ret) && i < row.count(); ++i) {
+      ObExpr *expr = MY_SPEC.column_exprs_.at(i);
+      const ObObj &obj = row.at(i);
+      CK (OB_NOT_NULL(expr));
+      if (OB_FAIL(ret)) {
+      } else if (obj.is_null()) {
+        expr->locate_datum_for_write(eval_ctx_).set_null();
+      } else {
+        const ObObjDatumMapType &datum_map = expr->obj_datum_map_;
+        ObDatum &datum = expr->locate_datum_for_write(eval_ctx_);
+        if (OB_FAIL(datum.from_obj(obj, datum_map))) {
+          LOG_WARN("failed to convert obj to datum", K(obj), K(ret));
+        }
+      }
+      if (OB_SUCC(ret)) {
+        expr->set_evaluated_projected(eval_ctx_);
+      }
+    }
+  }
+  return ret;
 }
 
 

@@ -334,6 +334,7 @@ public:
                                            const int64_t dimension, float *&vector);
   static int decode_float_embedding_array(const ObIJsonBase &embedding_jbase, ObIAllocator &allocator,
                                           share::ObJsonReaderHelper &json_reader, const int64_t dimension, float *&vector);
+  static int check_embedding_vector(ObIJsonBase *j_base, share::ObJsonReaderHelper &json_reader, int64_t &dimension);
   static int get_ai_func_info(ObIAllocator &allocator, const ObString &model_id,
                               share::schema::ObSchemaGetterGuard &guard, ObAIFuncExprInfo *&info);
   static int get_ai_func_info(ObIAllocator &allocator, const ObString &model_id, ObAIFuncExprInfo *&info);
