@@ -1031,6 +1031,13 @@
         res_obj.set_varchar(str_value); \
         ret = (class_obj).set_##column_name(res_obj); \
       } \
+      else if (column.is_ai_column()) { \
+        /* The default value of an AI column is the serialized AI COLUMN definition */ \
+        res_obj.set_varchar(str_value); \
+        res_obj.meta_.set_collation_type(CS_TYPE_UTF8MB4_BIN);  \
+        res_obj.meta_.set_collation_level(CS_LEVEL_IMPLICIT); \
+        ret = (class_obj).set_##column_name(res_obj); \
+      } \
       else if (IS_DEFAULT_NOW_STR(data_type, str_value)) \
       { \
         res_obj.set_ext(ObActionFlag::OP_DEFAULT_NOW_FLAG); \

@@ -420,6 +420,11 @@ private:
                     ObStmt *basic_stmt,
                     ObStmtNeedPrivs &stmt_need_privs);
 
+  // when the session variable ai_column_strict_read is enabled, check that
+  // the AI columns referenced by the select statement are computed, otherwise
+  // OB_ERR_AI_COLUMN_NOT_READY is reported
+  int check_ai_column_strict_read(ObStmt &basic_stmt, ObSqlCtx &sql_ctx);
+
   int generate_stmt_with_reconstruct_sql(ObDMLStmt* &stmt, 
                                         ObPlanCacheCtx *pc_ctx, 
                                         ObSqlCtx &context,

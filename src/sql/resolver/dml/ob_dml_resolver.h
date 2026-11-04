@@ -32,6 +32,7 @@ class ObChildStmtResolver;
 class ObDelUpdStmt;
 class ObSelectResolver;
 class ObInsertResolver;
+struct ObTableAssignment;
 
 static char *str_to_lower(char *pszBuf, int64_t length);
 /*
@@ -490,6 +491,20 @@ protected:
   int check_basic_column_generated(const ObColumnRefRawExpr *col_expr,
                                   ObDMLStmt *dml_stmt,
                                   bool &is_generated);
+  // AI column helpers. Business SQL must not assign values to AI columns
+  // directly; the background worker (internal session) is the only writer.
+  int check_ai_column_direct_assign(
+      const common::ObIArray<ObTableAssignment> &tables_assign);
+  int check_ai_column_direct_assign(
+      const common::ObIArray<ObColumnRefRawExpr *> &value_desc);
+  int check_ai_column_direct_assign(
+      const share::schema::ObTableSchema &table_schema,
+      const ObColumnRefRawExpr &col_expr);
+  // When a depended column (or a rowkey column) of an AI column is updated in
+  // the same statement, append an implicit assignment that resets the AI
+  // column to NULL in the same transaction.
+  int resolve_ai_column_invalidations(
+      common::ObIArray<ObTableAssignment> &tables_assign);
   virtual int expand_view(TableItem &view_item);
   int do_expand_view(TableItem &view_item, ObChildStmtResolver &view_resolver);
   int check_pad_generated_column(const ObSQLMode sql_mode,
