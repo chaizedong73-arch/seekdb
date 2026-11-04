@@ -87,5 +87,13 @@ int file_build_date(int32_t year, int32_t mon, int32_t mday, int32_t &ob_date);
 int file_build_datetime(int32_t year, int32_t mon, int32_t mday, int32_t hour, int32_t min,
     int32_t sec, int32_t usec, int64_t &ob_datetime);
 
+// Strict numeric text parsers shared by the csv and json readers:
+//   int64: optional +/- followed by digits only, the whole text is consumed
+//          and the value must fit into int64 (INT64_MIN/MAX included);
+//   double: optional +/-, digits with an optional fraction and/or exponent,
+//          the whole text is consumed ("inf"/"nan"/hex are rejected).
+bool file_parse_int64_text(const char *s, int64_t len, int64_t &val);
+bool file_parse_double_text(const char *s, int64_t len, double &val);
+
 } // end namespace sql
 } // end namespace oceanbase

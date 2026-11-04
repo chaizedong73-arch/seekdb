@@ -24,10 +24,12 @@ namespace sql
 {
 
 /**
- * @brief Skeleton reader for glob patterns ("*.csv" style paths).
- * The file table has one fixed column named "file" (VARCHAR), whose values
- * are the matched file paths. Data rows are not produced yet
- * (TODO: glob matching and directory traversal).
+ * @brief Reader for glob patterns ("*.csv" style paths).
+ * The pattern is split into a literal directory prefix and the last path
+ * component; only regular files whose name matches the wildcard pattern
+ * ('*' / '?' / '[...]') are collected and sorted by path. The file table
+ * has one fixed column named "file" (VARCHAR), whose values are the
+ * matched file paths.
  */
 class GlobFileTableReader : public IFileTableReader
 {
@@ -43,9 +45,17 @@ public:
   virtual void close() override;
 
 private:
+  // scan the directory of the pattern and collect the matched regular files
+  int scan_files_();
+
+private:
   common::ObIAllocator &alloc_;
   common::ObString path_;
+  FileReadOptions options_;
   common::ObSEArray<FileColumnMeta, 1> columns_;
+  common::ObSEArray<common::ObString, 8> matched_files_;
+  int64_t next_idx_;
+  int64_t rows_emitted_;
   bool inited_;
 };
 
