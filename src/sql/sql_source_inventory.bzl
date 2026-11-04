@@ -270,7 +270,10 @@ SQL_UNITY_GROUPS = [
         srcs = [
             "src/sql/engine/file_scan/file_table_reader.cpp",
             "src/sql/engine/file_scan/ob_csv_file_table_reader.cpp",
+            "src/sql/engine/file_scan/ob_file_table_type_infer.cpp",
             "src/sql/engine/file_scan/ob_glob_file_table_reader.cpp",
+            "src/sql/engine/file_scan/ob_json_file_table_reader.cpp",
+            "src/sql/engine/file_scan/ob_parquet_file_table_reader.cpp",
         ],
     ),
     struct(

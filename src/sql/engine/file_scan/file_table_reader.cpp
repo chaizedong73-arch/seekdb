@@ -19,6 +19,8 @@
 #include "sql/engine/file_scan/file_table_reader.h"
 #include "sql/engine/file_scan/ob_csv_file_table_reader.h"
 #include "sql/engine/file_scan/ob_glob_file_table_reader.h"
+#include "sql/engine/file_scan/ob_json_file_table_reader.h"
+#include "sql/engine/file_scan/ob_parquet_file_table_reader.h"
 
 namespace oceanbase
 {
@@ -74,6 +76,27 @@ int create_file_table_reader(const FileTableFormat format, ObIAllocator &alloc,
         LOG_WARN("failed to alloc glob file table reader", K(ret));
       } else {
         reader = new (buf) GlobFileTableReader(alloc);
+      }
+      break;
+    }
+    case FILE_TABLE_JSON:
+    case FILE_TABLE_NDJSON: {
+      void *buf = alloc.alloc(sizeof(JsonFileTableReader));
+      if (OB_ISNULL(buf)) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+        LOG_WARN("failed to alloc json file table reader", K(ret));
+      } else {
+        reader = new (buf) JsonFileTableReader(alloc, format);
+      }
+      break;
+    }
+    case FILE_TABLE_PARQUET: {
+      void *buf = alloc.alloc(sizeof(ParquetFileTableReader));
+      if (OB_ISNULL(buf)) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+        LOG_WARN("failed to alloc parquet file table reader", K(ret));
+      } else {
+        reader = new (buf) ParquetFileTableReader(alloc);
       }
       break;
     }
