@@ -18,6 +18,7 @@
 
 #include "ob_table_modify_op.h"
 #include "share/ob_autoincrement_service.h"
+#include "share/ob_ai_column_service.h"
 #include "query/session/ob_inner_sql_connection_access.h"
 #include "sql/engine/ob_physical_plan.h"
 #include "sql/engine/dml/ob_dml_service.h"
@@ -811,6 +812,27 @@ int ObTableModifyOp::inner_close()
     }
   }
   dml_modify_rows_.clear();
+  // after rows were actually modified, notify the async AI column service so
+  // it recomputes AI column values of the affected table; the notify is
+  // skipped when no row was touched so that the internal SQL run by the AI
+  // column service itself does not produce endless tasks
+  if (OB_SUCC(ret) && plan_ctx->get_affected_rows() > 0) {
+    const ObDMLBaseCtDef *dml_ctdef = NULL;
+    int tmp_ret = get_spec().get_single_dml_ctdef(dml_ctdef);
+    if (OB_NOT_IMPLEMENT == tmp_ret) {
+      // not a single table dml operator, the base table notification is done
+      // by its child operators
+      tmp_ret = OB_SUCCESS;
+    } else if (OB_SUCCESS != tmp_ret) {
+      LOG_WARN("fail to get dml ctdef for ai column notify", K(tmp_ret));
+      ret = tmp_ret;
+    } else if (OB_NOT_NULL(dml_ctdef)
+               && OB_FAIL(share::AIColumnService::get_instance().notify_dml(
+                   dml_ctdef->das_base_ctdef_.table_id_))) {
+      LOG_WARN("fail to notify ai column service after dml", K(ret),
+               K(dml_ctdef->das_base_ctdef_.table_id_));
+    }
+  }
   return ret;
 }
 

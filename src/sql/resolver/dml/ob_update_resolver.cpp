@@ -112,6 +112,21 @@ int ObUpdateResolver::resolve(const ParseNode &parse_tree)
     }
   }
 
+  if (OB_SUCC(ret)) {
+    // business SQL must not assign values to AI columns directly
+    if (OB_FAIL(check_ai_column_direct_assign(tables_assign))) {
+      LOG_WARN("fail to check ai column direct assign", K(ret));
+    }
+  }
+
+  if (OB_SUCC(ret)) {
+    // invalidate AI columns whose depend columns (or rowkey) are updated,
+    // the implicit NULL assignments are applied in the same transaction
+    if (OB_FAIL(resolve_ai_column_invalidations(tables_assign))) {
+      LOG_WARN("fail to resolve ai column invalidations", K(ret));
+    }
+  }
+
   //add column for table scan, keep rowkey column in the head
   if (OB_SUCC(ret)) {
     for (int64_t i = 0; OB_SUCC(ret) && i < tables_assign.count(); i++) {

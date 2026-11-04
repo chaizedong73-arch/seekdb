@@ -43,6 +43,8 @@
 
 #include "sql/printer/ob_select_stmt_printer.h"
 #include "share/ob_structured_event_logger.h"
+#include "share/ob_ai_column_service.h"
+#include "lib/string/ob_sql_string.h"
 namespace oceanbase
 {
 using namespace common;
@@ -763,6 +765,12 @@ int ObAlterTableExecutor::execute(ObExecContext &ctx, ObAlterTableStmt &stmt)
   OV (OB_NOT_NULL(task_exec_ctx = GET_SQL_EXECUTOR_CTX(ctx)), OB_NOT_INIT);
   if (OB_FAIL(ret)) {
     // do nothing
+  } else if (stmt.has_retry_ai_column()) {
+    // RETRY AI COLUMN does not change the schema: reset the AI column values
+    // of the selected rows and let the async AI column service recompute them
+    if (OB_FAIL(execute_retry_ai_column(ctx, stmt))) {
+      LOG_WARN("fail to execute retry ai column", K(ret));
+    }
   } else if (stmt.is_alter_triggers()) {
     if (stmt.get_tg_arg().trigger_infos_.count() > 0) {
       stmt.get_tg_arg().ddl_stmt_str_ = first_stmt;
@@ -913,6 +921,45 @@ int ObAlterTableExecutor::need_check_constraint_validity(obcall::ObAlterTableArg
       }
       if (OB_SUCC(ret) && !need_check) {
         (*iter)->set_need_validate_data(false);
+      }
+    }
+  }
+  return ret;
+}
+
+int ObAlterTableExecutor::execute_retry_ai_column(ObExecContext &ctx, ObAlterTableStmt &stmt)
+{
+  int ret = OB_SUCCESS;
+  ObSQLSessionInfo *my_session = ctx.get_my_session();
+  OV(OB_NOT_NULL(my_session), OB_ERR_UNEXPECTED);
+  if (OB_FAIL(ret)) {
+    // do nothing
+  } else {
+    const ObString &db_name = stmt.get_org_database_name();
+    const ObString &tbl_name = stmt.get_org_table_name();
+    const ObString &column_name = stmt.get_retry_ai_column_name();
+    const ObString &where_cond = stmt.get_retry_ai_column_where();
+    common::ObSqlString sql;
+    // reset the AI column values of the selected rows, the async AI column
+    // service recomputes rows whose AI column value is NULL
+    if (OB_FAIL(sql.append_fmt("UPDATE `%.*s`.`%.*s` SET `%.*s` = NULL",
+                               db_name.length(), db_name.ptr(),
+                               tbl_name.length(), tbl_name.ptr(),
+                               column_name.length(), column_name.ptr()))) {
+      LOG_WARN("fail to build retry ai column sql", K(ret), K(db_name), K(tbl_name));
+    } else if (!where_cond.empty()
+               && OB_FAIL(sql.append_fmt(" WHERE %.*s", where_cond.length(), where_cond.ptr()))) {
+      LOG_WARN("fail to append retry ai column where cond", K(ret));
+    } else if (OB_ISNULL(GCTX.sql_proxy_)) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("sql proxy is null", K(ret));
+    } else {
+      int64_t affected_rows = 0;
+      if (OB_FAIL(GCTX.sql_proxy_->write(sql.string(), affected_rows))) {
+        LOG_WARN("fail to reset ai column values", K(ret), K(sql));
+      } else if (OB_FAIL(share::AIColumnService::get_instance().reset_retry_state(
+                     stmt.get_alter_table_schema().get_table_id(), column_name, where_cond))) {
+        LOG_WARN("fail to resubmit ai column task", K(ret), K(stmt.get_alter_table_schema().get_table_id()));
       }
     }
   }

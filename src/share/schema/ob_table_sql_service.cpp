@@ -3119,10 +3119,12 @@ int ObTableSqlService::gen_column_dml_without_check(
   ObArenaAllocator allocator(ObModIds::OB_SCHEMA_OB_SCHEMA_ARENA);
   char *extended_type_info_buf = NULL;
   if (column.is_generated_column() ||
+      column.is_ai_column() ||
       ob_is_string_type(column.get_data_type()) ||
       ob_is_json(column.get_data_type()) ||
       ob_is_geometry(column.get_data_type())) {
     //The default value of the generated column is the expression definition of the generated column
+    //The default value of the AI column is the serialized AI COLUMN definition (json text)
     ObString orig_default_value_str = column.get_orig_default_value().get_string();
     ObString cur_default_value_str = column.get_cur_default_value().get_string();
     orig_default_value.assign_ptr(orig_default_value_str.ptr(), orig_default_value_str.length());

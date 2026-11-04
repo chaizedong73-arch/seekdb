@@ -403,11 +403,18 @@ int ObAlterTableResolver::resolve_action_list(const ParseNode &node)
         switch (action_node->type_) {
         //deal with alter table option
         case T_ALTER_TABLE_OPTION: {
-            alter_table_stmt->set_alter_table_option();
             if (OB_ISNULL(action_node->children_)) {
               ret = OB_ERR_UNEXPECTED;
               SQL_RESV_LOG(WARN, "invalid parse tree", K(ret));
-            } else if (OB_FAIL(resolve_table_option(action_node->children_[0], false))) {
+            } else if (OB_NOT_NULL(action_node->children_[0])
+                       && T_RETRY_AI_COLUMN == action_node->children_[0]->type_) {
+              // RETRY AI COLUMN action is not a real table option, resolve it separately.
+              if (OB_FAIL(resolve_retry_ai_column(*action_node->children_[0]))) {
+              }
+            } else {
+              alter_table_stmt->set_alter_table_option();
+              if (OB_FAIL(resolve_table_option(action_node->children_[0], false))) {
+              }
             }
             break;
           }
@@ -4361,6 +4368,55 @@ int ObAlterTableResolver::resolve_rename_column(const ParseNode &node)
       //rs end reuse ddl_change_column
       alter_column_schema.alter_type_ = OB_DDL_CHANGE_COLUMN;
       if (OB_FAIL(alter_table_stmt->add_column(alter_column_schema))) {
+      }
+    }
+  }
+  return ret;
+}
+
+int ObAlterTableResolver::resolve_retry_ai_column(const ParseNode &node)
+{
+  int ret = OB_SUCCESS;
+  ObAlterTableStmt *alter_table_stmt = get_alter_table_stmt();
+  if (T_RETRY_AI_COLUMN != node.type_ || OB_ISNULL(node.children_)
+      || OB_ISNULL(node.children_[0]) || OB_ISNULL(node.children_[0]->str_value_)
+      || node.children_[0]->str_len_ <= 0) {
+    ret = OB_ERR_UNEXPECTED;
+    SQL_RESV_LOG(WARN, "invalid parse tree!", K(ret));
+  } else if (OB_ISNULL(alter_table_stmt) || OB_ISNULL(schema_checker_) || OB_ISNULL(table_schema_)) {
+    ret = OB_ERR_UNEXPECTED;
+    SQL_RESV_LOG(WARN, "alter table resolver should not be null", K(ret));
+  } else {
+    ObString column_name(node.children_[0]->str_len_, node.children_[0]->str_value_);
+    const ObColumnSchemaV2 *column_schema = NULL;
+    if (OB_FAIL(schema_checker_->get_column_schema(table_schema_->get_table_id(),
+                                                   column_name,
+                                                   column_schema,
+                                                   false))) {
+      SQL_RESV_LOG(WARN, "fail to get retry column schema", K(ret), K(column_name));
+    } else if (OB_ISNULL(column_schema) || !column_schema->is_ai_column()) {
+      ret = OB_ERR_AI_COLUMN_NOT_EXISTS;
+      LOG_USER_ERROR(OB_ERR_AI_COLUMN_NOT_EXISTS,
+                     column_name.length(), column_name.ptr(),
+                     table_schema_->get_table_name_str().length(),
+                     table_schema_->get_table_name_str().ptr());
+    } else {
+      ParseNode *where_node = node.children_[1];
+      ObString where_cond;
+      if (OB_NOT_NULL(where_node) && OB_NOT_NULL(where_node->str_value_)
+          && where_node->str_len_ > 0) {
+        where_cond.assign_ptr(where_node->str_value_,
+                              static_cast<int32_t>(where_node->str_len_));
+      }
+      ObString copied_name;
+      ObString copied_where;
+      if (OB_FAIL(ob_write_string(*allocator_, column_name, copied_name))) {
+        SQL_RESV_LOG(WARN, "fail to deep copy retry ai column name", K(ret), K(column_name));
+      } else if (!where_cond.empty()
+                 && OB_FAIL(ob_write_string(*allocator_, where_cond, copied_where))) {
+        SQL_RESV_LOG(WARN, "fail to deep copy retry ai column where", K(ret), K(where_cond));
+      } else {
+        alter_table_stmt->set_retry_ai_column(copied_name, copied_where);
       }
     }
   }

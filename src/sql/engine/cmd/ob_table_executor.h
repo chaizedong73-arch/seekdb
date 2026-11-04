@@ -140,6 +140,11 @@ private:
 
   int need_check_constraint_validity(obcall::ObAlterTableArg &alter_table_arg, bool &need_check);
 
+  // execute ALTER TABLE ... RETRY AI COLUMN: no schema change is involved,
+  // reset the AI column values of the selected rows and resubmit the async
+  // computation task
+  int execute_retry_ai_column(ObExecContext &ctx, ObAlterTableStmt &stmt);
+
 
   int check_alter_partition(
       ObExecContext &ctx,

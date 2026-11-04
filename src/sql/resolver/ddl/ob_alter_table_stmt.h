@@ -104,6 +104,21 @@ public:
     alter_table_arg_.lock_session_create_ts_ = create_ts;
   }
   void set_lock_priority();
+
+  // RETRY AI COLUMN action: reset retry state of the given AI column and
+  // resubmit its async computation task, no schema change is involved.
+  // The given strings must be deep-copied by the caller (resolver) since the
+  // parse-tree memory is freed before execution.
+  bool has_retry_ai_column() const { return has_retry_ai_column_; }
+  const common::ObString &get_retry_ai_column_name() const { return retry_ai_column_name_; }
+  const common::ObString &get_retry_ai_column_where() const { return retry_ai_column_where_; }
+  void set_retry_ai_column(const common::ObString &column_name, const common::ObString &where_cond)
+  {
+    has_retry_ai_column_ = true;
+    retry_ai_column_name_ = column_name;
+    retry_ai_column_where_ = where_cond;
+  }
+
 private:
   obcall::ObAlterTableArg alter_table_arg_;
   bool is_comment_table_;
@@ -114,6 +129,9 @@ private:
   obcall::ObAlterTriggerArg tg_arg_;
   uint64_t alter_table_action_count_;
   obcall::ObExchangePartitionArg exchange_partition_arg_;
+  bool has_retry_ai_column_;
+  common::ObString retry_ai_column_name_;
+  common::ObString retry_ai_column_where_;
 };
 
 inline int ObAlterTableStmt::set_tz_info_wrap(const common::ObTimeZoneInfoWrap &tz_info_wrap)
