@@ -1,6 +1,13 @@
 #!/bin/bash
 # Build verification script for Codespace. Usage: bash sync.sh
 cd /workspaces/seekdb
+LOCK=/tmp/sync.lock
+if [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK")" 2>/dev/null; then
+  echo "sync.sh already running ($(cat "$LOCK")), exit"
+  exit 0
+fi
+echo $$ > "$LOCK"
+trap 'rm -f "$LOCK"' EXIT
 {
   echo "=== sync start $(date) ==="
   git branch --show-current
