@@ -8,6 +8,7 @@
       "options": { "cwd": "${workspaceFolder}" },
       "runOptions": { "runOn": "folderOpen" },
       "presentation": { "reveal": "always", "panel": "dedicated" },
+      "group": { "kind": "build", "isDefault": true },
       "problemMatcher": []
     }
   ]
