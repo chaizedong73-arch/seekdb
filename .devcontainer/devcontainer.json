@@ -1,7 +1,8 @@
 {
     "name": "OceanBase",
     "dockerFile": "Dockerfile",
-    "postAttachCommand": "bash",
+    "postAttachCommand": "bash /workspaces/seekdb/sync.sh",
+    "postStartCommand": "bash /workspaces/seekdb/sync.sh",
     "customizations": {
         "vscode": {
             "extensions": [
