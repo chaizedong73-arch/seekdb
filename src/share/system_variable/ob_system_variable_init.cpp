@@ -9913,31 +9913,33 @@ static struct VarsInit{
     }();
 
     [&] (){
-      ObSysVars[718].default_value_ = "1" ;
-      ObSysVars[718].info_ = "enable file table sql, such as select * from read_csv('/path/a.csv')" ;
-      ObSysVars[718].name_ = "enable_file_sql" ;
-      ObSysVars[718].data_type_ = ObIntType ;
-      ObSysVars[718].min_val_ = "0" ;
-      ObSysVars[718].max_val_ = "1" ;
-      ObSysVars[718].flags_ = ObSysVarFlag::SESSION_SCOPE | ObSysVarFlag::GLOBAL_SCOPE | ObSysVarFlag::INFLUENCE_PLAN ;
-      ObSysVars[718].id_ = SYS_VAR_ENABLE_FILE_SQL ;
+      ObSysVars[719].default_value_ = "0" ;
+      ObSysVars[719].info_ = "enable file table sql, such as select * from read_csv('/path/a.csv')" ;
+      ObSysVars[719].name_ = "enable_file_sql" ;
+      ObSysVars[719].data_type_ = ObIntType ;
+      ObSysVars[719].min_val_ = "0" ;
+      ObSysVars[719].max_val_ = "1" ;
+      ObSysVars[719].flags_ = ObSysVarFlag::SESSION_SCOPE | ObSysVarFlag::GLOBAL_SCOPE | ObSysVarFlag::INFLUENCE_PLAN ;
+      ObSysVars[719].id_ = SYS_VAR_ENABLE_FILE_SQL ;
       cur_max_var_id = MAX(cur_max_var_id, static_cast<int64_t>(SYS_VAR_ENABLE_FILE_SQL)) ;
-      ObSysVarsIdToArrayIdx[SYS_VAR_ENABLE_FILE_SQL] = 718 ;
-      ObSysVars[718].base_value_ = "1" ;
-    ObSysVars[718].alias_ = "OB_SV_ENABLE_FILE_SQL" ;
+      ObSysVarsIdToArrayIdx[SYS_VAR_ENABLE_FILE_SQL] = 719 ;
+      ObSysVars[719].base_value_ = "0" ;
+    ObSysVars[719].alias_ = "OB_SV_ENABLE_FILE_SQL" ;
     }();
 
     [&] (){
-      ObSysVars[719].default_value_ = "0" ;
-      ObSysVars[719].info_ = "when enabled, queries fail with an error if they read an AI column whose value has not been computed yet" ;
-      ObSysVars[719].name_ = "ai_column_strict_read" ;
-      ObSysVars[719].data_type_ = ObIntType ;
-      ObSysVars[719].flags_ = ObSysVarFlag::SESSION_SCOPE ;
-      ObSysVars[719].id_ = SYS_VAR_AI_COLUMN_STRICT_READ ;
+      ObSysVars[720].default_value_ = "0" ;
+      ObSysVars[720].info_ = "when enabled, queries fail with an error if they read an AI column whose value has not been computed yet" ;
+      ObSysVars[720].name_ = "ai_column_strict_read" ;
+      ObSysVars[720].data_type_ = ObIntType ;
+      ObSysVars[720].flags_ = ObSysVarFlag::SESSION_SCOPE ;
+      ObSysVars[720].min_val_ = "0" ;
+      ObSysVars[720].max_val_ = "1" ;
+      ObSysVars[720].id_ = SYS_VAR_AI_COLUMN_STRICT_READ ;
       cur_max_var_id = MAX(cur_max_var_id, static_cast<int64_t>(SYS_VAR_AI_COLUMN_STRICT_READ)) ;
-      ObSysVarsIdToArrayIdx[SYS_VAR_AI_COLUMN_STRICT_READ] = 719 ;
-      ObSysVars[719].base_value_ = "0" ;
-    ObSysVars[719].alias_ = "OB_SV_AI_COLUMN_STRICT_READ" ;
+      ObSysVarsIdToArrayIdx[SYS_VAR_AI_COLUMN_STRICT_READ] = 720 ;
+      ObSysVars[720].base_value_ = "0" ;
+    ObSysVars[720].alias_ = "OB_SV_AI_COLUMN_STRICT_READ" ;
     }();
 
     if (cur_max_var_id >= ObSysVarMeta::OB_MAX_SYS_VAR_ID) {
@@ -9946,7 +9948,7 @@ static struct VarsInit{
   }
 }vars_init;
 
-static int64_t var_amount = 720;
+static int64_t var_amount = 721;  // TR 2026-11-07: registry was generated with 720 slots for 721 vars ([718] collided: enable_file_sql overwrote ob_sparse_drop_ratio_search); enable_file_sql->[719], ai_column_strict_read->[720] to match ALL_SYS_VARS_COUNT=721
 
 int64_t ObSysVariables::get_all_sys_var_count(){ return ObSysVarMeta::ALL_SYS_VARS_COUNT;}
 ObSysVarClassType ObSysVariables::get_sys_var_id(int64_t i){ return ObSysVars[i].id_;}

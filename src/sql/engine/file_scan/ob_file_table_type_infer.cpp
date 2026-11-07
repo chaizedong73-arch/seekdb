@@ -367,6 +367,7 @@ int file_cell_kind_to_type(FileCellKind kind, ObObjMeta &type)
       break;
     case FCK_STRING:
       type.set_varchar();
+      type.set_collation_level(CS_LEVEL_IMPLICIT);
       type.set_collation_type(CS_TYPE_UTF8MB4_BIN);
       break;
     default:

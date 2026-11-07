@@ -240,22 +240,20 @@ int CsvFileTableReader::read_csv_row_(bool &has_row)
       }
     } else if (in_quotes) {
       if (quote_ch_ == c) {
-        if (quote_ch_ == escape_ch_) {
-          // doubled quote escape: "" -> literal quote
-          char n = '\0';
-          bool eof2 = false;
-          if (OB_FAIL(peek_char_(n, eof2))) {
-            LOG_WARN("failed to peek csv stream", K(path_), K(ret));
-          } else if (!eof2 && quote_ch_ == n) {
-            char dummy = '\0';
-            bool eof3 = false;
-            if (OB_FAIL(next_char_(dummy, eof3))) {
-              LOG_WARN("failed to consume doubled quote", K(ret));
-            } else if (OB_FAIL(append_byte_(quote_ch_))) {
-              LOG_WARN("failed to append escaped quote", K(ret));
-            }
-          } else {
-            in_quotes = false;
+        // 2026-11-08: 标准 CSV 语义——引号内连续两个引号表示一个字面引号。
+        // 原实现误判为 quote_ch_ == escape_ch_（默认 escape 是 \ 而 quote 是 "，恒不成立），
+        // 导致 "" 被当成"结束引号+重开引号"，字面引号丢失。
+        char n = '\0';
+        bool eof2 = false;
+        if (OB_FAIL(peek_char_(n, eof2))) {
+          LOG_WARN("failed to peek csv stream", K(path_), K(ret));
+        } else if (!eof2 && quote_ch_ == n) {
+          char dummy = '\0';
+          bool eof3 = false;
+          if (OB_FAIL(next_char_(dummy, eof3))) {
+            LOG_WARN("failed to consume doubled quote", K(ret));
+          } else if (OB_FAIL(append_byte_(quote_ch_))) {
+            LOG_WARN("failed to append escaped quote", K(ret));
           }
         } else {
           in_quotes = false;
@@ -428,6 +426,7 @@ int CsvFileTableReader::infer_schema_()
 {
   int ret = OB_SUCCESS;
   FileCellKind merged[OB_FILE_TABLE_MAX_COLUMN_COUNT];
+  bool saw_null[OB_FILE_TABLE_MAX_COLUMN_COUNT];
   int64_t col_count = 0;
   data_line_no_ = 0;
   buf_len_ = 0;
@@ -457,6 +456,7 @@ int CsvFileTableReader::infer_schema_()
       col_count = fields_.count();
       for (int64_t i = 0; OB_SUCC(ret) && i < col_count; ++i) {
         merged[i] = FCK_NONE;
+        saw_null[i] = false;
         FileColumnMeta col;
         if (options_.parse_header_) {
           const ObString &name = fields_.at(i);
@@ -513,6 +513,8 @@ int CsvFileTableReader::infer_schema_()
             LOG_WARN("failed to classify csv cell", K(i), K(ret));
           } else if (OB_FAIL(merge_file_cell_kind(merged[i], kind))) {
             LOG_WARN("failed to merge csv cell kind", K(i), K(ret));
+          } else if (FCK_NULL == kind) {
+            saw_null[i] = true;
           }
         }
         ++data_line_no_;
@@ -531,6 +533,8 @@ int CsvFileTableReader::infer_schema_()
             LOG_WARN("failed to classify csv cell", K(i), K(ret));
           } else if (OB_FAIL(merge_file_cell_kind(merged[i], kind))) {
             LOG_WARN("failed to merge csv cell kind", K(i), K(ret));
+          } else if (FCK_NULL == kind) {
+            saw_null[i] = true;
           }
         }
         ++data_line_no_;
@@ -547,6 +551,7 @@ int CsvFileTableReader::infer_schema_()
       FileColumnMeta col;
       col.name_ = ObString("COLUMN_0");
       col.type_.set_varchar();
+      col.type_.set_collation_level(CS_LEVEL_IMPLICIT);
       col.type_.set_collation_type(CS_TYPE_UTF8MB4_BIN);
       cell_kinds_.push_back(FCK_NONE);
       if (OB_FAIL(columns_.push_back(col))) {
@@ -561,6 +566,8 @@ int CsvFileTableReader::infer_schema_()
           LOG_WARN("failed to push csv cell kind", K(ret));
         } else {
           columns_.at(i).type_ = type;
+          // 2026-11-07: DESCRIBE null 列口径——采样中见过 NULL/未采样/全 NULL 列可空
+          columns_.at(i).nullable_ = saw_null[i] || FCK_NULL == merged[i] || FCK_NONE == merged[i];
         }
       }
     }

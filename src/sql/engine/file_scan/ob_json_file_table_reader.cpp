@@ -132,6 +132,7 @@ JsonFileTableReader::JsonFileTableReader(ObIAllocator &alloc, FileTableFormat fo
       val_buf_(NULL),
       val_cap_(0),
       val_used_(0),
+      infer_rows_(0),
       line_no_(0),
       rows_emitted_(0),
       inited_(false)
@@ -301,6 +302,10 @@ int JsonFileTableReader::find_or_add_column_(const ObString &name, int64_t &col_
         LOG_WARN("failed to push json column meta", K(ret));
       } else if (OB_FAIL(cell_kinds_.push_back(FCK_NONE))) {
         LOG_WARN("failed to push json cell kind", K(ret));
+      } else if (OB_FAIL(col_present_.push_back(0))) {
+        LOG_WARN("failed to push json column presence counter", K(ret));
+      } else if (OB_FAIL(col_saw_null_.push_back(false))) {
+        LOG_WARN("failed to push json column null flag", K(ret));
       } else {
         col_idx = columns_.count() - 1;
       }
@@ -436,7 +441,7 @@ int JsonFileTableReader::handle_kv_(bool for_infer, int64_t line_no, const ObStr
   } else if (col_idx < 0) {
     // a field that is not in the frozen schema (the file was appended after
     // init): skip it
-  } else if (for_infer) {
+    } else if (for_infer) {
     FileCellKind merged = cell_kinds_.at(col_idx);
     const FileCellKind prev = merged;
     if (OB_FAIL(merge_file_cell_kind(merged, kind))) {
@@ -448,6 +453,19 @@ int JsonFileTableReader::handle_kv_(bool for_infer, int64_t line_no, const ObStr
           K(prev), K(kind), K(ret));
     } else {
       cell_kinds_.at(col_idx) = merged;
+      // 2026-11-07: 记录本行出现过该键及 NULL 值，供 DESCRIBE null 列使用
+      while (infer_touched_.count() <= col_idx) {
+        if (OB_FAIL(infer_touched_.push_back(false))) {
+          LOG_WARN("failed to grow infer touched flags", K(ret));
+          break;
+        }
+      }
+      if (OB_SUCC(ret)) {
+        infer_touched_.at(col_idx) = true;
+        if (FCK_NULL == kind) {
+          col_saw_null_.at(col_idx) = true;
+        }
+      }
     }
   } else {
     ObObj obj;
@@ -492,6 +510,18 @@ int JsonFileTableReader::parse_json_line_(bool for_infer, bool &is_blank)
     LOG_WARN("failed to reserve json line value buffer", K(line_used_), K(ret));
   } else {
     clear_line_state_();
+    if (for_infer) {
+      // 2026-11-07: 每行开始重置键出现标记
+      while (infer_touched_.count() < columns_.count()) {
+        if (OB_FAIL(infer_touched_.push_back(false))) {
+          LOG_WARN("failed to grow infer touched flags", K(ret));
+          break;
+        }
+      }
+      for (int64_t i = 0; OB_SUCC(ret) && i < infer_touched_.count(); ++i) {
+        infer_touched_.at(i) = false;
+      }
+    }
     ++pos;
     // parse key/value pairs
     bool obj_closed = false;
@@ -626,6 +656,15 @@ int JsonFileTableReader::parse_json_line_(bool for_infer, bool &is_blank)
         }
       }
     }
+    if (OB_SUCC(ret) && for_infer) {
+      // 2026-11-07: 按行统计键出现情况，本行未出现的既有列记缺失
+      ++infer_rows_;
+      for (int64_t i = 0; OB_SUCC(ret) && i < columns_.count(); ++i) {
+        if (i < infer_touched_.count() && infer_touched_.at(i)) {
+          ++col_present_.at(i);
+        }
+      }
+    }
     if (OB_SUCC(ret)) {
       // only whitespace is allowed after the closing brace
       while (pos < line_used_ && is_json_ws(line_buf_[pos])) {
@@ -668,6 +707,7 @@ int JsonFileTableReader::infer_schema_()
       FileColumnMeta col;
       col.name_ = ObString("COLUMN_0");
       col.type_.set_varchar();
+      col.type_.set_collation_level(CS_LEVEL_IMPLICIT);
       col.type_.set_collation_type(CS_TYPE_UTF8MB4_BIN);
       if (OB_FAIL(columns_.push_back(col))) {
         LOG_WARN("failed to push default json column", K(ret));
@@ -681,6 +721,12 @@ int JsonFileTableReader::infer_schema_()
         LOG_WARN("failed to map json column type", K(i), K(cell_kinds_.at(i)), K(ret));
       } else {
         columns_.at(i).type_ = type;
+        // 2026-11-07: 缺失键或出现 NULL 值的列可空；未采样到数据行时保守置可空
+        columns_.at(i).nullable_ = (i < col_present_.count() && infer_rows_ > 0
+                                       && col_present_.at(i) < infer_rows_)
+                                   || (i < col_saw_null_.count() && col_saw_null_.at(i))
+                                   || FCK_NULL == cell_kinds_.at(i)
+                                   || FCK_NONE == cell_kinds_.at(i);
       }
     }
   }

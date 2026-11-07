@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#define USING_LOG_PREFIX SHARE
+
 #include "share/ob_ai_column_service.h"
 
 #include "lib/string/ob_sql_string.h"

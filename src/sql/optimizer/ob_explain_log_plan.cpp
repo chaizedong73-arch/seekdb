@@ -18,6 +18,7 @@
 #include "sql/optimizer/ob_explain_log_plan.h"
 #include "sql/optimizer/ob_log_values.h"
 #include "sql/code_generator/ob_code_generator.h"
+#include "sql/resolver/dml/ob_select_stmt.h"
 
 using namespace oceanbase;
 using namespace sql;
@@ -32,11 +33,79 @@ using namespace oceanbase::sql::log_op_def;
  *  2. generate the plan text from the logical plan and put the text in the buffer
  *     and remember the logical plan as well.
  */
+
+// 2026-11-07: DESCRIBE select ... 输出 DuckDB 风格 schema，这里做类型名映射
+static const char *file_describe_type_name(const ObRawExpr &expr)
+{
+  const char *name = "VARCHAR";
+  switch (expr.get_data_type()) {
+    case common::ObIntType:
+      name = "BIGINT";
+      break;
+    case common::ObDoubleType:
+      name = "DOUBLE";
+      break;
+    case common::ObTinyIntType:
+      name = "BOOLEAN";
+      break;
+    case common::ObVarcharType:
+      name = "VARCHAR";
+      break;
+    case common::ObDateType:
+      name = "DATE";
+      break;
+    case common::ObDateTimeType:
+      name = "DATETIME";
+      break;
+    case common::ObNullType:
+      name = "NULL";
+      break;
+    default:
+      break;
+  }
+  return name;
+}
+
+static const int64_t DESCRIBE_RESULT_COL_COUNT = 6;
+
+static int generate_describe_rows(const ObSelectStmt &select_stmt, ObLogValues &values_op)
+{
+  int ret = OB_SUCCESS;
+  for (int64_t i = 0; OB_SUCC(ret) && i < select_stmt.get_select_item_size(); ++i) {
+    const SelectItem &item = select_stmt.get_select_item(i);
+    const ObRawExpr *expr = item.expr_;
+    if (OB_ISNULL(expr)) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("describe select item has null expr", K(i), K(ret));
+    } else {
+      const ObString name = !item.expr_name_.empty()
+                                ? item.expr_name_
+                                : (!item.alias_name_.empty() ? item.alias_name_
+                                  : ObString(static_cast<int32_t>(4), "expr"));
+      const bool not_null = expr->get_result_type().has_result_flag(NOT_NULL_FLAG);
+      ObObj cells[DESCRIBE_RESULT_COL_COUNT];
+      cells[0].set_varchar(name);
+      cells[1].set_varchar(file_describe_type_name(*expr));
+      cells[2].set_varchar(not_null ? "NO" : "YES");
+      cells[3].set_null();
+      cells[4].set_null();
+      cells[5].set_null();
+      ObNewRow row;
+      row.cells_ = cells;
+      row.count_ = DESCRIBE_RESULT_COL_COUNT;
+      if (OB_FAIL(values_op.add_row(row))) {
+        LOG_WARN("failed to add describe row", K(i), K(ret));
+      }
+    }
+  }
+  return ret;
+}
 int ObExplainLogPlan::generate_normal_raw_plan()
 {
   int ret = OB_SUCCESS;
   if (OB_ISNULL(get_stmt()) || OB_UNLIKELY(!get_stmt()->is_explain_stmt())) {
     ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("get unexpected error", K(get_stmt()), K(ret));
   } else {
     ObLogPlan *child_plan = NULL;
     const ObDMLStmt *child_stmt = NULL;
@@ -46,6 +115,26 @@ int ObExplainLogPlan::generate_normal_raw_plan()
     const ObExplainStmt *explain_stmt = static_cast<const ObExplainStmt*>(get_stmt());
     if (OB_ISNULL(child_stmt = explain_stmt->get_explain_query_stmt())) {
       ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("get unexpected null", K(ret));
+    } else if (explain_stmt->is_describe() && child_stmt->get_stmt_type() == stmt::T_SELECT) {
+      // 2026-11-07: DESCRIBE select ... 直接产出 schema 行，不生成真实查询计划
+      if (OB_FAIL(allocate_values_as_top(top))) {
+        LOG_WARN("failed to allocate values operator for describe", K(ret));
+      } else if (OB_ISNULL(top) || OB_UNLIKELY(LOG_VALUES != top->get_type())) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("get unexpected error", K(top), K(ret));
+      } else {
+        set_plan_root(top);
+        top->mark_is_plan_root();
+        values_op = static_cast<ObLogValues*>(top);
+        if (OB_FAIL(generate_describe_rows(*static_cast<const ObSelectStmt *>(child_stmt),
+                                           *values_op))) {
+          LOG_WARN("failed to generate describe rows", K(ret));
+        } else {
+          values_op->set_op_id(0);
+          set_max_op_id(1);
+        }
+      }
     } else if (OB_ISNULL(child_plan = optimizer_context_.get_log_plan_factory().
                          create(optimizer_context_, *child_stmt))) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
@@ -57,6 +146,7 @@ int ObExplainLogPlan::generate_normal_raw_plan()
     } else if (OB_FAIL(allocate_values_as_top(top))) {
     } else if (OB_ISNULL(top) || OB_UNLIKELY(LOG_VALUES != top->get_type())) {
       ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("get unexpected error", K(top), K(ret));
     } else {
       set_plan_root(top);
       top->mark_is_plan_root();
@@ -99,6 +189,35 @@ int ObExplainLogPlan::generate_normal_raw_plan()
     }
     get_optimizer_context().get_all_exprs().reuse();
     if (OB_FAIL(ret)) {
+    } else if (explain_stmt->is_describe() && NULL != child_stmt && child_stmt->get_stmt_type() == stmt::T_SELECT) {
+      // 2026-11-07: DESCRIBE 分配 6 个 varchar 输出表达式
+      ObConstRawExpr *output = NULL;
+      for (int64_t i = 0; OB_SUCC(ret) && i < DESCRIBE_RESULT_COL_COUNT; ++i) {
+        output = NULL;
+        if (OB_FAIL(optimizer_context_.get_expr_factory().create_raw_expr(T_VARCHAR, output))) {
+          LOG_WARN("failed to create describe output expr", K(i), K(ret));
+        } else {
+          ObObj v;
+          v.set_varchar(" ");
+          v.set_collation_type(ObCharset::get_system_collation());
+          output->set_value(v);
+          if (OB_FAIL(output->formalize(optimizer_context_.get_session_info()))) {
+            LOG_WARN("failed to formalize describe output expr", K(i), K(ret));
+          } else if (OB_FAIL(values_op->get_output_exprs().push_back(output))) {
+            LOG_WARN("failed to push describe output expr", K(i), K(ret));
+          } else if (OB_FAIL(get_optimizer_context().get_all_exprs().append(output))) {
+            LOG_WARN("failed to append describe output expr", K(i), K(ret));
+          }
+        }
+      }
+      if (OB_SUCC(ret)) {
+        values_op->set_branch_id(0);
+        values_op->set_id(0);
+        values_op->set_op_id(0);
+        get_optimizer_context().set_plan_type(ObPhyPlanType::OB_PHY_PLAN_LOCAL,
+                                              ObPhyPlanType::OB_PHY_PLAN_LOCAL,
+                                              false);
+      }
     } else if (OB_FAIL(allocate_output_expr_for_values_op(*values_op))) {
     } else {
       get_optimizer_context().set_plan_type(ObPhyPlanType::OB_PHY_PLAN_LOCAL,
@@ -122,6 +241,7 @@ int ObExplainLogPlan::check_explain_generate_plan_with_outline(ObLogPlan *real_p
       || OB_ISNULL(session_info = get_optimizer_context().get_session_info())
       || OB_ISNULL(sql_ctx = exec_ctx->get_sql_ctx()) || OB_ISNULL(query_ctx)) {
     ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("get unexpected null", K(ret), K(real_plan), K(explain_stmt), K(session_info), K(exec_ctx), K(sql_ctx));
   } else if (session_info->is_inner() || sql_ctx->is_prepare_protocol_) {
     /* do not check explain for inner sql (include query in PL) */
   } else if (OB_UNLIKELY(get_optimizer_context().get_query_ctx() != NULL
@@ -158,6 +278,7 @@ int ObExplainLogPlan::check_explain_generate_plan_with_outline(ObLogPlan *real_p
         sql_ctx->first_const_param_cons_cnt_ = query_ctx->all_plan_const_param_constraints_.count();
         sql_ctx->first_expr_cons_cnt_ = query_ctx->all_expr_constraints_.count();
         ret = OB_SQL_RETRY_OUTLINE;
+        LOG_WARN("generate plan again for explain use outline", K(ret));
       }
     }
   } else {  /* check generate plan again use outline data */

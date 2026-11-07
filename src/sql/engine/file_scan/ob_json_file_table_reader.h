@@ -99,6 +99,11 @@ private:
   int64_t val_used_;
   common::ObSEArray<bool, 16> row_set_flags_;
   common::ObSEArray<common::ObObj, 16> row_objs_;
+  // 2026-11-07: DESCRIBE null 列口径——采样行中缺失/为 NULL 的列可空
+  int64_t infer_rows_;
+  common::ObSEArray<int64_t, 16> col_present_;
+  common::ObSEArray<bool, 16> col_saw_null_;
+  common::ObSEArray<bool, 16> infer_touched_;
   int64_t line_no_;
   int64_t rows_emitted_;
   FileTableFileStat file_stat_;

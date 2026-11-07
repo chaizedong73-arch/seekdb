@@ -26,11 +26,12 @@ const static int64_t EXPLAIN_DISPLAY_OPTION = 1;
 const static int64_t EXPLAIN_INTO_TABLE = 2;
 const static int64_t EXPLAIN_STMT_ID = 3;
 const static int64_t EXPLAIN_CHILD_STMT = 4;
+const static int64_t EXPLAIN_DESC_MARKER = 5;
 int ObExplainResolver::resolve(const ParseNode &parse_tree)
 {
   int ret = OB_SUCCESS;
   ObExplainStmt *explain_stmt = NULL;
-  if (!(T_EXPLAIN == parse_tree.type_  && 5 == parse_tree.num_child_)) {
+  if (!(T_EXPLAIN == parse_tree.type_  && 6 == parse_tree.num_child_)) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("invalid EXPLAIN syntax",
              "type", parse_tree.type_,
@@ -43,6 +44,7 @@ int ObExplainResolver::resolve(const ParseNode &parse_tree)
     ObStmt *child_stmt = NULL;
     ObExplainDisplayOpt opt;
     opt.with_tree_line_ = true;
+    explain_stmt->set_is_describe(NULL != parse_tree.children_[EXPLAIN_DESC_MARKER]);
     if (OB_ISNULL(child_node)) {
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("empty parse tree for stmt");

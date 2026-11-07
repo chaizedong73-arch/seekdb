@@ -201,7 +201,9 @@ int GlobFileTableReader::init(const ObString &path, const FileReadOptions &optio
       FileColumnMeta col;
       col.name_ = ObString("file");
       col.type_.set_varchar();
+      col.type_.set_collation_level(CS_LEVEL_IMPLICIT);
       col.type_.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+      col.nullable_ = false;
       if (OB_FAIL(columns_.push_back(col))) {
         LOG_WARN("failed to push file column meta", K(ret));
       }

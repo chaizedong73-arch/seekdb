@@ -7565,13 +7565,29 @@ int ObDMLResolver::resolve_function_table_column_item_file(const TableItem &tabl
   if (OB_SUCC(ret)) {
     for (int64_t i = 0; OB_SUCC(ret) && i < col_metas.count(); ++i) {
       const FileColumnMeta &col_meta = col_metas.at(i);
-      ObAccuracy accuracy(static_cast<ObLength>(OB_MAX_VARCHAR_LENGTH));
+      // 2026-11-07: accuracy 按类型区分——字符串给最大长度，其余用默认(-1)。
+      // 共用 varchar 长度精度会把 DOUBLE 的 precision/scale 写成 0（98.5 显示成 98）。
+      ObAccuracy accuracy;
+      if (col_meta.type_.is_varchar() || col_meta.type_.is_char()) {
+        accuracy = ObAccuracy(static_cast<ObLength>(OB_MAX_VARCHAR_LENGTH));
+      }
       ColumnItem *col_item = NULL;
       if (OB_FAIL(resolve_function_table_column_item(table_item, col_meta.type_, accuracy,
               col_meta.name_, OB_APP_MIN_COLUMN_ID + i, col_item))) {
         LOG_WARN("failed to resolve file table column item", K(col_meta.name_), K(ret));
-      } else if (OB_FAIL(col_items.push_back(*col_item))) {
-        LOG_WARN("failed to push column item", K(ret));
+      } else if (OB_ISNULL(col_item) || OB_ISNULL(col_item->expr_)) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("file table column item is null", K(col_meta.name_), K(ret));
+      } else {
+        // 2026-11-07: 把推断出的可空性写到列表达式，供 DESCRIBE 和空值分析使用
+        if (col_meta.nullable_) {
+          col_item->expr_->unset_result_flag(NOT_NULL_FLAG);
+        } else {
+          col_item->expr_->set_result_flag(NOT_NULL_FLAG);
+        }
+        if (OB_FAIL(col_items.push_back(*col_item))) {
+          LOG_WARN("failed to push column item", K(ret));
+        }
       }
     }
   }
