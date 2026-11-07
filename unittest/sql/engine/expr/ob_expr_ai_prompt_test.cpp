@@ -96,7 +96,7 @@ TEST_F(ObAIPromptTest, repeated_long_json_arguments)
   ASSERT_EQ(OB_SUCCESS, ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(
                            allocator, prompt, result));
   ASSERT_EQ(ObString("abcdefghijklmnopqrstuvwx/abcdefghijklmnopqrstuvwx/"
-                     "abcdefghijklmnopqrstuvwx/{\"k\":2}"), result);
+                     "abcdefghijklmnopqrstuvwx/{\"k\": 2}"), result);
 }
 
 TEST_F(ObAIPromptTest, json_array_is_one_argument)
@@ -108,7 +108,8 @@ TEST_F(ObAIPromptTest, json_array_is_one_argument)
   ASSERT_EQ(OB_SUCCESS, ObAIFuncJsonUtils::get_json_object_form_str(allocator, raw, prompt));
   ASSERT_EQ(OB_SUCCESS, ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(
                            allocator, prompt, result));
-  ASSERT_EQ(ObString("[1,true]/[1,true]/{\"k\":2}"), result);
+  // JSON values use the shared SQL JSON printer's canonical spacing.
+  ASSERT_EQ(ObString("[1, true]/[1, true]/{\"k\": 2}"), result);
 }
 
 TEST_F(ObAIPromptTest, nested_prompt_and_invalid_index)

@@ -48,6 +48,34 @@ bool is_json_ws(char c)
   return ' ' == c || '\t' == c || '\r' == c || '\n' == c;
 }
 
+bool is_json_number(const char *text, int64_t length)
+{
+  const auto digit = [](char c) { return c >= '0' && c <= '9'; };
+  int64_t pos = 0;
+  if (pos < length && text[pos] == '-') { ++pos; }
+  if (pos >= length) { return false; }
+  if (text[pos] == '0') {
+    ++pos;
+  } else if (text[pos] >= '1' && text[pos] <= '9') {
+    while (pos < length && digit(text[pos])) { ++pos; }
+  } else {
+    return false;
+  }
+  if (pos < length && text[pos] == '.') {
+    const int64_t start = ++pos;
+    while (pos < length && digit(text[pos])) { ++pos; }
+    if (pos == start) { return false; }
+  }
+  if (pos < length && (text[pos] == 'e' || text[pos] == 'E')) {
+    ++pos;
+    if (pos < length && (text[pos] == '+' || text[pos] == '-')) { ++pos; }
+    const int64_t start = pos;
+    while (pos < length && digit(text[pos])) { ++pos; }
+    if (pos == start) { return false; }
+  }
+  return pos == length;
+}
+
 int hex_digit_val(char c, int32_t &val)
 {
   int ret = OB_SUCCESS;
@@ -67,7 +95,9 @@ int hex_digit_val(char c, int32_t &val)
 int append_utf8_code_point(char *buf, int64_t cap, int64_t &used, uint32_t cp)
 {
   int ret = OB_SUCCESS;
-  if (OB_UNLIKELY(used + 4 > cap)) {
+  if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+    ret = OB_INVALID_DATA;
+  } else if (OB_UNLIKELY(used + 4 > cap)) {
     ret = OB_SIZE_OVERFLOW;
     LOG_WARN("failed to append utf8 code point", K(used), K(cap), K(ret));
   } else if (cp <= 0x7F) {
@@ -381,6 +411,9 @@ int JsonFileTableReader::parse_json_string_(int64_t &pos, ObString &text)
               break;
           }
         }
+      } else if (static_cast<uint8_t>(c) < 0x20) {
+        ret = OB_INVALID_DATA;
+        LOG_WARN("unescaped control character in json string", K(line_no_), K(ret));
       } else {
         val_buf_[val_used_++] = c;
         ++pos;
@@ -462,6 +495,7 @@ int JsonFileTableReader::parse_json_line_(bool for_infer, bool &is_blank)
     ++pos;
     // parse key/value pairs
     bool obj_closed = false;
+    bool after_comma = false;
     while (OB_SUCC(ret) && !obj_closed) {
       while (pos < line_used_ && is_json_ws(line_buf_[pos])) {
         ++pos;
@@ -470,9 +504,15 @@ int JsonFileTableReader::parse_json_line_(bool for_infer, bool &is_blank)
         ret = OB_INVALID_DATA;
         LOG_WARN("unterminated json object", K(path_), K(line_no_), K(ret));
       } else if ('}' == line_buf_[pos]) {
-        ++pos;
-        obj_closed = true;
+        if (after_comma) {
+          ret = OB_INVALID_DATA;
+          LOG_WARN("trailing comma in json object", K(line_no_), K(ret));
+        } else {
+          ++pos;
+          obj_closed = true;
+        }
       } else {
+        after_comma = false;
         // parse the key
         ObString key;
         if ('"' != line_buf_[pos]) {
@@ -546,7 +586,9 @@ int JsonFileTableReader::parse_json_line_(bool for_infer, bool &is_blank)
                 text.assign_ptr(line_buf_ + num_start, static_cast<int32_t>(pos - num_start));
                 int64_t ival = 0;
                 double dval = 0.0;
-                if (file_parse_int64_text(text.ptr(), text.length(), ival)) {
+                if (!is_json_number(text.ptr(), text.length())) {
+                  ret = OB_INVALID_DATA;
+                } else if (file_parse_int64_text(text.ptr(), text.length(), ival)) {
                   kind = FCK_INT;
                 } else if (file_parse_double_text(text.ptr(), text.length(), dval)) {
                   kind = FCK_DOUBLE;
@@ -569,6 +611,7 @@ int JsonFileTableReader::parse_json_line_(bool for_infer, bool &is_blank)
                     LOG_WARN("unterminated json object", K(path_), K(line_no_), K(ret));
                   } else if (',' == line_buf_[pos]) {
                     ++pos;
+                    after_comma = true;
                   } else if ('}' == line_buf_[pos]) {
                     ++pos;
                     obj_closed = true;

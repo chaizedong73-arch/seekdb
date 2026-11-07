@@ -468,13 +468,18 @@ int ParquetFileTableReader::dup_string_(const ObString &src, ObString &dst)
 int ParquetFileTableReader::alloc_buf_(char *&buf, int64_t &cap, int64_t need)
 {
   int ret = OB_SUCCESS;
-  if (need <= cap) {
+  if (need < 0) {
+    ret = OB_INVALID_DATA;
+  } else if (need > MAX_BUFFER_SIZE) {
+    ret = OB_SIZE_OVERFLOW;
+  } else if (need <= cap) {
     // fast path
   } else {
     int64_t new_cap = (cap <= 0 ? need : cap * 2);
     while (new_cap < need) {
       new_cap *= 2;
     }
+    if (new_cap > MAX_BUFFER_SIZE) { new_cap = MAX_BUFFER_SIZE; }
     char *new_buf = static_cast<char *>(alloc_.alloc(new_cap));
     if (OB_ISNULL(new_buf)) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
@@ -624,6 +629,8 @@ int ParquetFileTableReader::read_footer_()
         ret = OB_INVALID_DATA;
         LOG_WARN("bad parquet footer length", K(path_), K(footer_len), K(file_stat_.file_size_),
             K(ret));
+      } else if (footer_len > MAX_BUFFER_SIZE) {
+        ret = OB_SIZE_OVERFLOW;
       } else {
         char *footer_buf = static_cast<char *>(alloc_.alloc(footer_len));
         if (OB_ISNULL(footer_buf)) {
@@ -1098,6 +1105,8 @@ int ParquetFileTableReader::decode_dictionary_page_(ColCursor &cur, int64_t col_
   if (OB_UNLIKELY(info.dict_num_values_ < 0)) {
     ret = OB_INVALID_DATA;
     LOG_WARN("bad parquet dictionary num values", K(info.dict_num_values_), K(ret));
+  } else if (info.dict_num_values_ > MAX_BUFFER_SIZE / static_cast<int64_t>(sizeof(ObObj))) {
+    ret = OB_SIZE_OVERFLOW;
   } else {
     if (OB_NOT_NULL(cur.dict_objs_) && cur.dict_count_ < info.dict_num_values_) {
       alloc_.free(cur.dict_objs_);
