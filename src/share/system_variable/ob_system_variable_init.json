@@ -10979,9 +10979,9 @@
   "enable_file_sql": {
     "id": 10754,
     "name": "enable_file_sql",
-    "default_value": "1",
-    "base_value": "1",
-    "data_type": "int",
+    "default_value": "0",
+    "base_value": "0",
+    "data_type": "bool",
     "info": "enable file table sql, such as select * from read_csv('/path/a.csv')",
     "flags": "GLOBAL|SESSION|INFLUENCE_PLAN",
     "min_val": "0",

@@ -19,6 +19,7 @@
 #include "lib/alloc/alloc_struct.h"
 #include "lib/allocator/page_arena.h"
 #include "lib/charset/ob_charset.h"
+#include "lib/lock/ob_spin_lock.h"
 #include "common/json_type/ob_json_base.h"
 #include "common/json_type/ob_json_tree.h"
 #include "lib/ob_errno.h"
@@ -225,7 +226,7 @@ int ObExprTokenize::parse_param(const ObExpr &expr,
   } else if (OB_FAIL(parse_fulltext(expr, ctx, param))) {
   } else if (OB_FAIL(parse_parser_name(expr, ctx, param))) {
   } else if (OB_FAIL(parse_parser_properties(expr, ctx, temp_allocator, param))) {
-  } else if (OB_FAIL(param.reform_parser_properties(param.properties_))) {
+  } else if (OB_FAIL(param.reform_parser_properties_cached(param.properties_))) {
   } else if (OB_FAIL(param.try_load_dictionary_for_ik())) {
   }
   return ret;
@@ -403,6 +404,89 @@ int ObExprTokenize::TokenizeParam::reform_parser_properties(const ObString &prop
   } else if (OB_FAIL(parser_properties.to_format_json(allocator_, properties_))) {
   }
 
+  return ret;
+}
+
+namespace
+{
+struct TokenizePropsCacheEntry
+{
+  common::ObString parser_name_;
+  common::ObString raw_props_;
+  common::ObString reformed_props_;
+};
+
+constexpr int64_t TOKENIZE_PROPS_CACHE_MAX = 16;
+
+common::ObArenaAllocator &get_tokenize_props_cache_alloc()
+{
+  static common::ObArenaAllocator alloc(lib::ObMemAttr("TokenizeProps"));
+  return alloc;
+}
+
+common::ObSpinLock &get_tokenize_props_cache_lock()
+{
+  static common::ObSpinLock lock;
+  return lock;
+}
+
+TokenizePropsCacheEntry g_tokenize_props_cache[TOKENIZE_PROPS_CACHE_MAX];
+int64_t g_tokenize_props_cache_cnt = 0;
+
+int copy_props_cache_str(const common::ObString &src, common::ObString &dst)
+{
+  int ret = OB_SUCCESS;
+  if (0 == src.length()) {
+    dst = common::ObString();
+  } else {
+    char *buf = nullptr;
+    if (OB_ISNULL(buf = static_cast<char *>(get_tokenize_props_cache_alloc().alloc(src.length())))) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+      LOG_WARN("failed to alloc for props cache", K(ret), K(src.length()));
+    } else {
+      MEMCPY(buf, src.ptr(), src.length());
+      dst.assign_ptr(buf, static_cast<int32_t>(src.length()));
+    }
+  }
+  return ret;
+}
+} // anonymous namespace
+
+int ObExprTokenize::TokenizeParam::reform_parser_properties_cached(const ObString &properties)
+{
+  int ret = OB_SUCCESS;
+  common::ObSpinLockGuard guard(get_tokenize_props_cache_lock());
+  ret = guard.get_ret();
+  bool hit = false;
+  if (OB_FAIL(ret)) {
+    LOG_WARN("failed to lock tokenize props cache", K(ret));
+  } else {
+    for (int64_t i = 0; OB_SUCC(ret) && !hit && i < g_tokenize_props_cache_cnt; ++i) {
+      if (g_tokenize_props_cache[i].parser_name_ == parser_name_
+          && g_tokenize_props_cache[i].raw_props_ == properties) {
+        properties_ = g_tokenize_props_cache[i].reformed_props_;
+        hit = true;
+      }
+    }
+    if (OB_SUCC(ret) && !hit) {
+      // reform under the lock: on miss only, and the raw properties string
+      // is row-local so it must be used and copied before we leave the row.
+      if (OB_FAIL(reform_parser_properties(properties))) {
+      } else if (g_tokenize_props_cache_cnt < TOKENIZE_PROPS_CACHE_MAX) {
+        TokenizePropsCacheEntry &entry = g_tokenize_props_cache[g_tokenize_props_cache_cnt];
+        // cache insert failure does not affect the query result, just skip caching
+        if (OB_FAIL(copy_props_cache_str(parser_name_, entry.parser_name_))) {
+          ret = OB_SUCCESS;
+        } else if (OB_FAIL(copy_props_cache_str(properties, entry.raw_props_))) {
+          ret = OB_SUCCESS;
+        } else if (OB_FAIL(copy_props_cache_str(properties_, entry.reformed_props_))) {
+          ret = OB_SUCCESS;
+        } else {
+          ++g_tokenize_props_cache_cnt;
+        }
+      }
+    }
+  }
   return ret;
 }
 

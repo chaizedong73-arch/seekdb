@@ -730,6 +730,8 @@ int ParquetFileTableReader::parse_file_meta_(ThriftCursor &tc)
                   FileColumnMeta col;
                   col.name_ = leaf.name_;
                   col.type_ = type;
+                  // 2026-11-07: parquet OPTIONAL 列可空，REQUIRED 列不可空
+                  col.nullable_ = (FRT_REQUIRED != leaf.repetition_);
                   if (OB_FAIL(columns_.push_back(col))) {
                     LOG_WARN("failed to push parquet column meta", K(ret));
                   }
@@ -1018,6 +1020,7 @@ int ParquetFileTableReader::map_leaf_type_(const LeafCol &leaf, ObObjMeta &type)
     case PQT_BYTE_ARRAY:
     case PQT_FIXED_LEN_BYTE_ARRAY:
       type.set_varchar();
+      type.set_collation_level(CS_LEVEL_IMPLICIT);
       type.set_collation_type(CS_TYPE_UTF8MB4_BIN);
       break;
     default:

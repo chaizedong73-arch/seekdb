@@ -281,19 +281,53 @@ int ObSql::fill_result_set(ObResultSet &result_set,
       break;
     }
     case stmt::T_EXPLAIN: {
-      ObString tname = ObString::make_string("explain_table");
-      ObString cname = ObString::make_string("Query Plan");
-      field.tname_ = tname;
-      field.org_tname_ = tname;
-      field.cname_ = cname;
-      field.org_cname_ = cname;
-      field.type_.set_type(ObVarcharType);
-      field.charsetnr_ = CS_TYPE_UTF8MB4_GENERAL_CI;
-      field.type_.set_collation_type(CS_TYPE_UTF8MB4_GENERAL_CI);
-      field.type_.set_collation_level(CS_LEVEL_IMPLICIT);
-      field.type_.set_varchar(type_name);
-      if (OB_FAIL(result_set.reserve_field_columns(1))) {
-      } else if (OB_FAIL(result_set.add_field_column(field))) {
+      const ObExplainStmt *explain_stmt = static_cast<const ObExplainStmt *>(stmt);
+      const ObDMLStmt *explained_stmt = explain_stmt->get_explain_query_stmt();
+      if (explain_stmt->is_describe() && NULL != explained_stmt && explained_stmt->get_stmt_type() == stmt::T_SELECT) {
+        // 2026-11-07: DESCRIBE select ... 用 DuckDB 风格 schema 列
+        static const ObString describe_cols[] = {
+            ObString::make_string("column_name"),
+            ObString::make_string("column_type"),
+            ObString::make_string("null"),
+            ObString::make_string("key"),
+            ObString::make_string("default"),
+            ObString::make_string("extra"),
+        };
+        const int64_t describe_col_count = static_cast<int64_t>(
+            sizeof(describe_cols) / sizeof(describe_cols[0]));
+        ObString tname = ObString::make_string("describe_table");
+        if (OB_FAIL(result_set.reserve_field_columns(describe_col_count))) {
+          LOG_WARN("failed to reserve describe field columns", K(ret));
+        }
+        for (int64_t i = 0; OB_SUCC(ret) && i < describe_col_count; ++i) {
+          field.tname_ = tname;
+          field.org_tname_ = tname;
+          field.cname_ = describe_cols[i];
+          field.org_cname_ = describe_cols[i];
+          field.type_.set_type(ObVarcharType);
+          field.charsetnr_ = CS_TYPE_UTF8MB4_GENERAL_CI;
+          field.type_.set_collation_type(CS_TYPE_UTF8MB4_GENERAL_CI);
+          field.type_.set_collation_level(CS_LEVEL_IMPLICIT);
+          field.type_.set_varchar(type_name);
+          if (OB_FAIL(result_set.add_field_column(field))) {
+            LOG_WARN("failed to add describe field column", K(i), K(ret));
+          }
+        }
+      } else {
+        ObString tname = ObString::make_string("explain_table");
+        ObString cname = ObString::make_string("Query Plan");
+        field.tname_ = tname;
+        field.org_tname_ = tname;
+        field.cname_ = cname;
+        field.org_cname_ = cname;
+        field.type_.set_type(ObVarcharType);
+        field.charsetnr_ = CS_TYPE_UTF8MB4_GENERAL_CI;
+        field.type_.set_collation_type(CS_TYPE_UTF8MB4_GENERAL_CI);
+        field.type_.set_collation_level(CS_LEVEL_IMPLICIT);
+        field.type_.set_varchar(type_name);
+        if (OB_FAIL(result_set.reserve_field_columns(1))) {
+        } else if (OB_FAIL(result_set.add_field_column(field))) {
+        }
       }
       break;
     }

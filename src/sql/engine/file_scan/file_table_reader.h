@@ -51,11 +51,13 @@ constexpr int64_t OB_FILE_TABLE_DEFAULT_SAMPLE_SIZE = -1;
  */
 struct FileColumnMeta
 {
-  FileColumnMeta() : name_(), type_()
+  FileColumnMeta() : name_(), type_(), nullable_(true)
   {}
   common::ObString name_;
   common::ObObjMeta type_;
-  TO_STRING_KV(K_(name), K_(type));
+  // 2026-11-07: 采样数据是否含 NULL/缺失，DESCRIBE 输出 null 列用
+  bool nullable_;
+  TO_STRING_KV(K_(name), K_(type), K_(nullable_));
 };
 
 /**

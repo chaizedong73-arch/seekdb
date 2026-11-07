@@ -341,6 +341,18 @@ bool ObSqlParameterization::is_tree_not_param(const ParseNode *tree)
     ret_bool = true;
   } else if (T_VEC_INDEX_PARAMS == tree->type_) {
     ret_bool = true;
+  } else if (T_FUN_SYS == tree->type_) {
+    // 2026-11-07: 文件表函数的路径必须是 resolve 期常量字面量（reader 建表采样用），
+    // 参数化会把路径变成 '?' 使 resolve 期拿到空值，故整个函数子树不参数化
+    const ParseNode *name_node = (tree->num_child_ > 0 && NULL != tree->children_) ? tree->children_[0] : NULL;
+    if (NULL != name_node && NULL != name_node->str_value_) {
+      const ObString func_name(name_node->str_len_, name_node->str_value_);
+      ret_bool = (0 == func_name.case_compare("read_csv")
+                  || 0 == func_name.case_compare("read_json")
+                  || 0 == func_name.case_compare("read_ndjson")
+                  || 0 == func_name.case_compare("read_parquet")
+                  || 0 == func_name.case_compare("glob"));
+    }
   } else {
     // do nothing
   }

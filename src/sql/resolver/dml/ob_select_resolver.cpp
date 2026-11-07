@@ -1475,6 +1475,15 @@ int ObSelectResolver::resolve_field_list(const ParseNode &node)
       ObRawExpr *sel_expr = NULL;
       if (OB_FAIL(resolve_sql_expr(*project_node, select_item.expr_))) {
         LOG_WARN("resolve sql expr failed", K(ret));
+        // ZC-DIAG: select 列表表达式解析失败定位
+        {
+          FILE *zc_f = fopen("/home/chaizedong/zcdiag.txt", "a");
+          if (NULL != zc_f) {
+            fprintf(zc_f, "ZC-DIAG field_list resolve_sql_expr failed idx=%d ret=%d node_type=%d\n",
+                    (int)i, (int)ret, (int)(OB_ISNULL(project_node) ? -1 : (int)project_node->type_));
+            fclose(zc_f);
+          }
+        }
         if (OB_EER_WINDOW_NO_REDEFINE_ORDER_BY == ret
             && OB_NOT_NULL(project_node)
             && project_node->num_child_ > 1
@@ -1952,7 +1961,29 @@ int ObSelectResolver::resolve_all_function_table_columns(
 {
   int ret = OB_SUCCESS;
   CK (OB_NOT_NULL(column_items));
-  OZ (resolve_function_table_column_item(table_item, *column_items));
+  // 2026-11-08: 文件表列在 FROM 解析阶段已注册（含类型推断与 reader 采样）。
+  // star 展开若走通用路径会重复建 reader、重复注册同名动态列，导致重复列报错。
+  // 这里优先复用已注册的列；没有已注册列时回退到通用解析路径。
+  bool reused = false;
+  ObDMLStmt *stmt = get_stmt();
+  if (OB_NOT_NULL(stmt)
+      && OB_NOT_NULL(table_item.function_table_expr_)
+      && FileTableFuncExpr::is_file_table_func_type(
+             table_item.function_table_expr_->get_expr_type())) {
+    for (int64_t i = 0; OB_SUCC(ret) && i < stmt->get_column_size(); ++i) {
+      ColumnItem *ci = stmt->get_column_item(i);
+      if (OB_NOT_NULL(ci) && ci->table_id_ == table_item.table_id_) {
+        if (OB_FAIL(column_items->push_back(*ci))) {
+          LOG_WARN("failed to push back function table column item", K(ret));
+        } else {
+          reused = true;
+        }
+      }
+    }
+  }
+  if (OB_SUCC(ret) && !reused) {
+    OZ (resolve_function_table_column_item(table_item, *column_items));
+  }
   return ret;
 }
 
