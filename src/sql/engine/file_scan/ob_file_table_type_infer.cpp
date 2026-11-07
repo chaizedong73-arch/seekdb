@@ -333,6 +333,9 @@ int merge_file_cell_kind(FileCellKind &acc, FileCellKind incoming)
   } else if ((FCK_INT == acc && FCK_DOUBLE == incoming)
              || (FCK_DOUBLE == acc && FCK_INT == incoming)) {
     acc = FCK_DOUBLE;
+  } else if ((FCK_DATE == acc && FCK_DATETIME == incoming)
+             || (FCK_DATETIME == acc && FCK_DATE == incoming)) {
+    acc = FCK_DATETIME;
   } else {
     acc = FCK_STRING;
   }

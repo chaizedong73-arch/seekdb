@@ -8,6 +8,7 @@
 #include "lib/allocator/page_arena.h"
 #include "sql/engine/file_scan/ob_csv_file_table_reader.h"
 #include "sql/engine/file_scan/ob_json_file_table_reader.h"
+#include "sql/engine/file_scan/ob_parquet_file_table_reader.h"
 
 namespace oceanbase
 {
@@ -103,6 +104,61 @@ TEST(FileTableReaderJson, union_schema_and_missing_values)
   EXPECT_EQ(2, row.at(0).get_int());
   EXPECT_TRUE(row.at(1).is_null());
   EXPECT_DOUBLE_EQ(2.5, row.at(2).get_double());
+  reader.close();
+}
+TEST(FileTableReaderJson, rejects_invalid_json_syntax)
+{
+  const char *inputs[] = {"{\"n\":01}", "{\"n\":+1}", "{\"n\":1,}",
+                          "{\"s\":\"\x01\"}", "{\"s\":\"\\uDC00\"}"};
+  for (const char *input : inputs) {
+    SCOPED_TRACE(input);
+    char path[] = "/tmp/seekdb-bad-json-XXXXXX";
+    const int fd = mkstemp(path);
+    ASSERT_GE(fd, 0);
+    FILE *file = fdopen(fd, "wb");
+    ASSERT_NE(nullptr, file);
+    EXPECT_EQ(strlen(input), fwrite(input, 1, strlen(input), file));
+    ASSERT_EQ(0, fclose(file));
+    ObArenaAllocator allocator(ObModIds::TEST);
+    JsonFileTableReader reader(allocator, FILE_TABLE_NDJSON);
+    FileReadOptions options;
+    const int init_ret = reader.init(ObString(path), options);
+    unlink(path);
+    EXPECT_EQ(OB_INVALID_DATA, init_ret);
+    reader.close();
+  }
+}
+
+TEST(FileTableReaderTypes, date_widens_to_datetime)
+{
+  FileCellKind merged = FCK_DATE;
+  ASSERT_EQ(OB_SUCCESS, merge_file_cell_kind(merged, FCK_DATETIME));
+  ASSERT_EQ(FCK_DATETIME, merged);
+  ObObjMeta type;
+  ASSERT_EQ(OB_SUCCESS, file_cell_kind_to_type(merged, type));
+  ObObj value;
+  ASSERT_EQ(OB_SUCCESS, file_cell_text_to_obj(ObString("2026-11-07"), type, FCK_DATE, value));
+  EXPECT_EQ(ObDateTimeType, value.get_type());
+}
+TEST(FileTableReaderParquet, rejects_oversized_footer_before_allocating_it)
+{
+  char path[] = "/tmp/seekdb-parquet-limit-XXXXXX";
+  const int fd = mkstemp(path);
+  ASSERT_GE(fd, 0);
+  const uint32_t footer_size = 300U << 20;
+  ASSERT_EQ(0, ftruncate(fd, static_cast<off_t>(footer_size) + 12));
+  EXPECT_EQ(4, pwrite(fd, "PAR1", 4, 0));
+  char tail[8] = {};
+  for (int i = 0; i < 4; ++i) { tail[i] = static_cast<char>(footer_size >> (8 * i)); }
+  memcpy(tail + 4, "PAR1", 4);
+  EXPECT_EQ(8, pwrite(fd, tail, sizeof(tail), static_cast<off_t>(footer_size) + 4));
+  ASSERT_EQ(0, close(fd));
+  ObArenaAllocator allocator(ObModIds::TEST);
+  ParquetFileTableReader reader(allocator);
+  FileReadOptions options;
+  const int init_ret = reader.init(ObString(path), options);
+  unlink(path);
+  EXPECT_EQ(OB_SIZE_OVERFLOW, init_ret);
   reader.close();
 }
 } // namespace sql

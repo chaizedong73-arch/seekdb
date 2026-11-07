@@ -303,6 +303,7 @@ private:
 private:
   static const int64_t HDR_PRE_READ_SIZE = 8LL * 1024;
   static const int64_t HDR_MAX_READ_SIZE = 1LL << 20;
+  static const int64_t MAX_BUFFER_SIZE = 256LL << 20;
   static const int64_t FOOTER_MAGIC_SIZE = 8;
 
 private:
