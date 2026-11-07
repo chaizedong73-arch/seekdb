@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SQL_ENG
 
 #include "sql/engine/file_scan/ob_parquet_file_table_reader.h"
+#include "share/ob_errno.h"
 
 #include <new>
 #include <stdio.h>
@@ -451,12 +452,13 @@ int ParquetFileTableReader::dup_string_(const ObString &src, ObString &dst)
   } else if (src.empty()) {
     dst = src;
   } else {
-    char *buf = static_cast<char *>(alloc_.alloc(src.length()));
+    char *buf = static_cast<char *>(alloc_.alloc(src.length() + 1));
     if (OB_ISNULL(buf)) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
       LOG_WARN("failed to alloc memory for string", K(src.length()), K(ret));
     } else {
       MEMCPY(buf, src.ptr(), static_cast<size_t>(src.length()));
+      buf[src.length()] = '\0';
       dst.assign_ptr(buf, static_cast<int32_t>(src.length()));
     }
   }
@@ -1157,7 +1159,8 @@ int ParquetFileTableReader::load_next_page_(ColCursor &cur, int64_t col_idx, boo
     PageHeaderInfo info;
     int64_t hdr_consumed = 0;
     int64_t want = HDR_PRE_READ_SIZE;
-    for (bool hdr_ok = false; OB_SUCC(ret) && !hdr_ok;) {
+    bool hdr_ok = false;
+    for (; OB_SUCC(ret) && !hdr_ok;) {
       if (OB_UNLIKELY(0 != ::fseek(fp_, base, SEEK_SET))) {
         ret = OB_IO_ERROR;
         LOG_WARN("failed to seek parquet page header", K(base), K(ret));
@@ -1722,7 +1725,12 @@ int ParquetFileTableReader::rle_next_(const char *buf, int64_t buf_len, int64_t 
     if (OB_SUCC(ret)) {
       run_left = static_cast<int64_t>(h >> 1);
       literal = (0 != (h & 1));
-      if (literal) {
+      if (run_left <= 0 || (literal && run_left > INT64_MAX / 8)) {
+        ret = OB_INVALID_DATA;
+        LOG_WARN("invalid parquet RLE run length", K(h), K(ret));
+      } else if (literal) {
+        // Bit-packed headers count groups of eight values, not individual values.
+        run_left *= 8;
         bit_acc = 0;
         bits = 0;
       } else {
@@ -1952,6 +1960,12 @@ int ParquetFileTableReader::get_file_stat(FileTableFileStat &stat) const
     } else {
       stat.file_size_ = static_cast<int64_t>(st.st_size);
       stat.last_modify_time_ = static_cast<int64_t>(st.st_mtime);
+      stat.inode_ = st.st_ino;
+#if defined(__linux__)
+      stat.modify_nsec_ = st.st_mtim.tv_nsec;
+#elif defined(__APPLE__)
+      stat.modify_nsec_ = st.st_mtimespec.tv_nsec;
+#endif
     }
   }
   return ret;

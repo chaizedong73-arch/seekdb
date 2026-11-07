@@ -28,6 +28,60 @@ using namespace common;
 namespace sql
 {
 
+int parse_file_read_options(const ObIArray<ObObj> &args, FileReadOptions &options)
+{
+  int ret = OB_SUCCESS;
+  if (args.count() < 1 || args.count() % 2 != 1) {
+    ret = OB_INVALID_ARGUMENT;
+  }
+  for (int64_t i = 1; OB_SUCC(ret) && i < args.count(); i += 2) {
+    const ObObj &value = args.at(i + 1);
+    if (!args.at(i).is_string_type() || value.is_null()) {
+      ret = OB_INVALID_ARGUMENT;
+    } else {
+      ObString name = args.at(i).get_string();
+      for (int64_t j = 1; OB_SUCC(ret) && j < i; j += 2) {
+        if (0 == name.case_compare(args.at(j).get_string())) {
+          ret = OB_INVALID_ARGUMENT;
+        }
+      }
+      if (OB_FAIL(ret)) {
+      } else if (0 == name.case_compare("header")) {
+        if (!value.is_integer_type() || (value.get_int() != 0 && value.get_int() != 1)) {
+          ret = OB_INVALID_ARGUMENT;
+        } else {
+          options.parse_header_ = value.get_int() != 0;
+        }
+      } else if (0 == name.case_compare("sample_size")) {
+        if (!value.is_integer_type() || value.get_int() != -1) {
+          ret = OB_NOT_SUPPORTED;
+          LOG_USER_ERROR(OB_NOT_SUPPORTED, "file SQL sample_size other than -1");
+        }
+      } else if (!value.is_string_type()) {
+        ret = OB_INVALID_ARGUMENT;
+      } else if (0 == name.case_compare("delimiter") || 0 == name.case_compare("delim")) {
+        options.field_delimiter_ = value.get_string();
+        if (options.field_delimiter_.length() != 1) { ret = OB_INVALID_ARGUMENT; }
+      } else if (0 == name.case_compare("quote")) {
+        options.quote_char_ = value.get_string();
+        if (options.quote_char_.length() != 1) { ret = OB_INVALID_ARGUMENT; }
+      } else if (0 == name.case_compare("escape")) {
+        options.escape_char_ = value.get_string();
+        if (options.escape_char_.length() != 1) { ret = OB_INVALID_ARGUMENT; }
+      } else if (0 == name.case_compare("nullstr") || 0 == name.case_compare("null")) {
+        options.null_str_ = value.get_string();
+      } else if (0 == name.case_compare("format")) {
+        if (0 != value.get_string().case_compare("newline_delimited")) {
+          ret = OB_NOT_SUPPORTED;
+        }
+      } else {
+        ret = OB_INVALID_ARGUMENT;
+      }
+    }
+  }
+  return ret;
+}
+
 const char *IFileTableReader::format_to_str(FileTableFormat format)
 {
   const char *str = "UNKNOWN";

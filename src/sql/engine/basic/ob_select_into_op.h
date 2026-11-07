@@ -91,6 +91,7 @@ public:
   int64_t buffer_size_;
   bool is_overwrite_;
   ObExternalFileFormat::StringData external_properties_;
+  CopyCsvOptions copy_csv_;
   static const int64_t DEFAULT_MAX_FILE_SIZE = 256LL * 1024 * 1024;
   static const int64_t DEFAULT_BUFFER_SIZE = 1LL * 1024 * 1024;
 };
@@ -126,7 +127,11 @@ public:
       external_properties_(),
       format_type_(ObExternalFileFormat::FormatType::CSV_FORMAT),
       block_id_(0),
-      need_commit_(true)
+      need_commit_(true),
+      copy_temp_fd_(-1),
+      copy_temp_path_(),
+      copy_final_path_(),
+      copy_complete_(false)
   {
   }
 
@@ -292,6 +297,12 @@ private:
   ObExternalFileFormat::FormatType format_type_;
   uint32_t block_id_;
   bool need_commit_;
+  int prepare_copy_file(ObExternalFileWriter &writer);
+  int finish_copy_file(bool publish);
+  int copy_temp_fd_;
+  common::ObString copy_temp_path_;
+  common::ObString copy_final_path_;
+  bool copy_complete_;
   static const int64_t SHARED_BUFFER_SIZE = 2LL * 1024 * 1024;
 
 };

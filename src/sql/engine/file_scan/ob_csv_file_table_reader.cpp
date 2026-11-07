@@ -17,12 +17,14 @@
 #define USING_LOG_PREFIX SQL_ENG
 
 #include "sql/engine/file_scan/ob_csv_file_table_reader.h"
+#include "share/ob_errno.h"
 
 #include <stdio.h>
 #include <string.h>
 
 #include "lib/charset/ob_charset.h"
 #include "lib/ob_define.h"
+#include "lib/string/ob_sql_string.h"
 #include "lib/utility/alloc_assist.h"
 #include "lib/utility/ob_print_utils.h"
 #include "sql/engine/file_scan/ob_file_table_type_infer.h"
@@ -72,12 +74,13 @@ int CsvFileTableReader::dup_string_(const ObString &src, ObString &dst)
   } else if (src.empty()) {
     dst = src;
   } else {
-    char *buf = static_cast<char *>(alloc_.alloc(src.length()));
+    char *buf = static_cast<char *>(alloc_.alloc(src.length() + 1));
     if (OB_ISNULL(buf)) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
       LOG_WARN("failed to alloc memory for string", K(src.length()), K(ret));
     } else {
       MEMCPY(buf, src.ptr(), static_cast<size_t>(src.length()));
+      buf[src.length()] = '\0';
       dst.assign_ptr(buf, static_cast<int32_t>(src.length()));
     }
   }
@@ -481,6 +484,21 @@ int CsvFileTableReader::infer_schema_()
             LOG_WARN("failed to copy default column name", K(ret));
           }
         }
+        const ObString original_name = col.name_;
+        int64_t suffix = 2;
+        bool duplicate = true;
+        while (OB_SUCC(ret) && duplicate) {
+          duplicate = false;
+          for (int64_t j = 0; j < columns_.count() && !duplicate; ++j) {
+            duplicate = columns_.at(j).name_.case_compare(col.name_) == 0;
+          }
+          if (duplicate) {
+            ObSqlString unique_name;
+            if (OB_FAIL(unique_name.append_fmt("%.*s__%ld", original_name.length(), original_name.ptr(), suffix++))) {
+            } else if (OB_FAIL(dup_string_(unique_name.string(), col.name_))) {
+            }
+          }
+        }
         if (OB_SUCC(ret) && OB_FAIL(columns_.push_back(col))) {
           LOG_WARN("failed to push csv column meta", K(ret));
         }
@@ -655,6 +673,12 @@ int CsvFileTableReader::get_file_stat(FileTableFileStat &stat) const
     } else {
       stat.file_size_ = static_cast<int64_t>(st.st_size);
       stat.last_modify_time_ = static_cast<int64_t>(st.st_mtime);
+      stat.inode_ = st.st_ino;
+#if defined(__linux__)
+      stat.modify_nsec_ = st.st_mtim.tv_nsec;
+#elif defined(__APPLE__)
+      stat.modify_nsec_ = st.st_mtimespec.tv_nsec;
+#endif
     }
   }
   return ret;

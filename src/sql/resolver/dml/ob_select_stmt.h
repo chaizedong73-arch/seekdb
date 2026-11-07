@@ -113,6 +113,25 @@ struct SelectItem
   bool is_hidden_rowid_;
 };
 
+struct CopyCsvOptions
+{
+  OB_UNIS_VERSION(1);
+public:
+  CopyCsvOptions() : enabled_(false), header_line_(), null_string_() {}
+  int deep_copy(common::ObIAllocator &allocator, const CopyCsvOptions &other)
+  {
+    int ret = common::OB_SUCCESS;
+    enabled_ = other.enabled_;
+    if (OB_FAIL(common::ob_write_string(allocator, other.header_line_, header_line_))) {
+    } else if (OB_FAIL(common::ob_write_string(allocator, other.null_string_, null_string_))) {
+    }
+    return ret;
+  }
+  bool enabled_;
+  common::ObString header_line_;
+  common::ObString null_string_;
+};
+
 struct ObSelectIntoItem
 {
   ObSelectIntoItem()
@@ -155,6 +174,7 @@ struct ObSelectIntoItem
     cs_type_ = other.cs_type_;
     buffer_size_ = other.buffer_size_;
     external_properties_ = other.external_properties_;
+    copy_csv_ = other.copy_csv_;
     return user_vars_.assign(other.user_vars_);
   }
   int deep_copy(ObIAllocator &allocator,
@@ -186,6 +206,7 @@ struct ObSelectIntoItem
   common::ObCollationType cs_type_;
   int64_t buffer_size_;
   common::ObString external_properties_;
+  CopyCsvOptions copy_csv_;
 
   static const char* const DEFAULT_FIELD_TERM_STR;
   static const char* const DEFAULT_LINE_TERM_STR;

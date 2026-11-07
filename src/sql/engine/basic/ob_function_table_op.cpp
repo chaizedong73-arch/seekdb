@@ -65,7 +65,7 @@ int ObFunctionTableOp::inner_rescan()
       value_table_ = NULL;
       already_calc_ = false;
     }
-    // for file table: rewind or re-init the reader when the file is changed
+    // A rescan belongs to the same statement and must see the same file.
     if (OB_SUCC(ret) && OB_NOT_NULL(file_reader_)
         && FileTableFuncExpr::is_file_table_func_type(MY_SPEC.value_expr_->type_)) {
       FileTableFileStat cur_stat;
@@ -77,9 +77,8 @@ int ObFunctionTableOp::inner_rescan()
       }
       if (OB_SUCC(ret)) {
         if (file_changed) {
-          if (OB_FAIL(init_file_table_reader())) {
-            LOG_WARN("failed to re-init file table reader on rescan", K(ret));
-          }
+          ret = OB_INVALID_DATA;
+          LOG_WARN("file changed during statement execution", K(ret));
         } else if (OB_FAIL(file_reader_->reuse())) {
           LOG_WARN("failed to reuse file table reader on rescan", K(ret));
         }
@@ -135,11 +134,18 @@ int ObFunctionTableOp::init_file_table_reader()
         LOG_USER_ERROR(OB_INVALID_ARGUMENT, "path of file table function");
       } else {
         ObString path = path_datum->get_string();
-        FileReadOptions options; // default read options for now
+        FileReadOptions options;
         if (OB_NOT_NULL(file_reader_)) {
           file_reader_->close();
         }
-        if (OB_FAIL(create_file_table_reader(format, ctx_.get_allocator(), file_reader_))) {
+        if (OB_FAIL(FileTableFuncExpr::get_read_options(*value_expr, eval_ctx_, options))) {
+          LOG_WARN("invalid file reader options", K(ret));
+        } else if (OB_ISNULL(ctx_.get_my_session())) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (OB_FAIL(FileTableFuncExpr::validate_path(*ctx_.get_my_session(),
+                            ctx_.get_allocator(), format, path, options))) {
+          LOG_WARN("file access denied", K(ret));
+        } else if (OB_FAIL(create_file_table_reader(format, ctx_.get_allocator(), file_reader_))) {
           LOG_WARN("failed to create file table reader", K(format), K(ret));
         } else if (OB_FAIL(file_reader_->init(path, options))) {
           LOG_WARN("failed to init file table reader", K(path), K(ret));
@@ -165,8 +171,13 @@ int ObFunctionTableOp::inner_get_next_row_file()
   } else if (OB_FAIL(ctx_.check_status())) {
   } else {
     bool has_next = false;
+    FileTableFileStat current_stat;
     file_row_.reuse();
-    if (OB_FAIL(file_reader_->get_next_row(file_row_, has_next))) {
+    if (OB_FAIL(file_reader_->get_file_stat(current_stat))) {
+    } else if (current_stat != file_stat_) {
+      ret = OB_INVALID_DATA;
+      LOG_WARN("file changed during statement execution", K(ret));
+    } else if (OB_FAIL(file_reader_->get_next_row(file_row_, has_next))) {
       LOG_WARN("failed to get next row from file table reader", K(ret));
     } else if (!has_next) {
       ret = OB_ITER_END;

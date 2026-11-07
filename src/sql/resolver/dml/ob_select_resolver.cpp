@@ -28,6 +28,7 @@
 #include "sql/engine/expr/ob_expr_regexp_context.h"
 #include "sql/engine/expr/ob_json_param_type.h"
 #include "sql/parser/ob_parser_utils.h"
+#include "sql/engine/expr/ob_expr_file_table_func.h"
 
 #include "sql/executor/ob_memory_tracker.h"
 namespace oceanbase
@@ -2986,6 +2987,106 @@ int ObSelectResolver::resolve_into_file_node(const ParseNode *list_node, ObSelec
   return ret;
 }
 
+int ObSelectResolver::resolve_copy_csv(const ParseNode *node, ObSelectIntoItem &into_item)
+{
+  int ret = OB_SUCCESS;
+  ObSEArray<ObObj, 16> args;
+  FileReadOptions options;
+  options.escape_char_ = ObString("\"");
+  bool format_seen = false;
+  if (OB_ISNULL(node) || OB_ISNULL(session_info_) || OB_ISNULL(allocator_)
+      || OB_ISNULL(get_select_stmt()) || node->num_child_ < 2) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(resolve_into_const_node(node->children_[0], into_item.outfile_name_))) {
+  } else if (!into_item.outfile_name_.is_string_type()) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_FAIL(args.push_back(into_item.outfile_name_))) {
+  }
+  const ParseNode *option_list = OB_SUCC(ret) ? node->children_[1] : nullptr;
+  if (OB_SUCC(ret) && OB_NOT_NULL(option_list)) {
+    if (option_list->type_ != T_EXPR_LIST || option_list->num_child_ % 2 != 0) {
+      ret = OB_INVALID_ARGUMENT;
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < option_list->num_child_; i += 2) {
+      const ParseNode *key = option_list->children_[i];
+      const ParseNode *value = option_list->children_[i + 1];
+      if (OB_ISNULL(key) || OB_ISNULL(value)) {
+        ret = OB_INVALID_ARGUMENT;
+      } else {
+        const ObString name(key->str_len_, key->str_value_);
+        ObObj parsed;
+        if (value->type_ == T_VARCHAR) {
+          parsed.set_varchar(ObString(value->str_len_, value->str_value_));
+        } else if (value->type_ == T_BOOL || value->type_ == T_INT) {
+          parsed.set_int(value->value_);
+        } else {
+          ret = OB_INVALID_ARGUMENT;
+        }
+        if (OB_FAIL(ret)) {
+        } else if (name.case_compare("format") == 0) {
+          if (format_seen || !parsed.is_string_type()
+              || parsed.get_string().case_compare("csv") != 0) {
+            ret = OB_NOT_SUPPORTED;
+            LOG_USER_ERROR(OB_NOT_SUPPORTED, "COPY format other than CSV");
+          }
+          format_seen = true;
+        } else {
+          ObObj parsed_key;
+          parsed_key.set_varchar(name);
+          if (OB_FAIL(args.push_back(parsed_key))) {
+          } else if (OB_FAIL(args.push_back(parsed))) {
+          }
+        }
+      }
+    }
+  }
+  ObString output_path;
+  if (OB_FAIL(ret)) {
+  } else if (OB_FAIL(parse_file_read_options(args, options))) {
+  } else {
+    output_path = into_item.outfile_name_.get_string();
+    ret = FileTableFuncExpr::validate_path(*session_info_, *allocator_, FILE_TABLE_CSV,
+                                          output_path, options, true);
+  }
+  if (OB_SUCC(ret)) {
+    into_item.outfile_name_.set_varchar(output_path);
+    into_item.field_str_.set_varchar(options.field_delimiter_);
+    into_item.line_str_.set_varchar(ObString("\n"));
+    into_item.closed_cht_.meta_.set_char();
+    into_item.closed_cht_.set_char_value(options.quote_char_.ptr(), 1);
+    into_item.escaped_cht_.meta_.set_char();
+    into_item.escaped_cht_.set_char_value(options.escape_char_.ptr(), 1);
+    into_item.is_optional_ = true;
+    into_item.is_single_ = true;
+    into_item.max_file_size_ = INT64_MAX;
+    into_item.copy_csv_.enabled_ = true;
+    if (OB_FAIL(ob_write_string(*allocator_, options.null_str_, into_item.copy_csv_.null_string_))) {
+    } else if (options.parse_header_) {
+      ObSqlString header;
+      const char quote = options.quote_char_[0];
+      const char escape = options.escape_char_[0];
+      for (int64_t i = 0; OB_SUCC(ret) && i < get_select_stmt()->get_select_item_size(); ++i) {
+        const SelectItem &item = get_select_stmt()->get_select_item(i);
+        const ObString name = item.alias_name_.empty() ? item.expr_name_ : item.alias_name_;
+        if (i > 0) { ret = header.append(options.field_delimiter_); }
+        if (OB_SUCC(ret)) { ret = header.append(&quote, 1); }
+        for (int64_t j = 0; OB_SUCC(ret) && j < name.length(); ++j) {
+          if (name[j] == quote || (escape != quote && name[j] == escape)) {
+            ret = header.append(&escape, 1);
+          }
+          if (OB_SUCC(ret)) { ret = header.append(name.ptr() + j, 1); }
+        }
+        if (OB_SUCC(ret)) { ret = header.append(&quote, 1); }
+      }
+      if (OB_SUCC(ret) && OB_FAIL(header.append("\n"))) {
+      } else if (OB_SUCC(ret) && OB_FAIL(ob_write_string(*allocator_, header.string(),
+                                                       into_item.copy_csv_.header_line_))) {
+      }
+    }
+  }
+  return ret;
+}
+
 int ObSelectResolver::resolve_into_outfile_with_format(const ParseNode *node, ObSelectIntoItem &into_item)
 {
   int ret = OB_SUCCESS;
@@ -3105,7 +3206,9 @@ int ObSelectResolver::resolve_into_clause(const ParseNode *node)
       new(into_item) ObSelectIntoItem();
       into_item->into_type_ = node->type_;
       if (T_INTO_OUTFILE == node->type_) { // into outfile
-        if (is_in_set_query()) {
+        if (node->value_ == 1) {
+          ret = resolve_copy_csv(node, *into_item);
+        } else if (is_in_set_query()) {
           ret = OB_INAPPROPRIATE_INTO;
         } else if (node->num_child_ == 3 && NULL != node->children_[1]
             && T_EXTERNAL_FILE_FORMAT == node->children_[1]->type_) { // Handle with `FORMAT`

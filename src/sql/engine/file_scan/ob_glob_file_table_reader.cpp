@@ -17,9 +17,11 @@
 #define USING_LOG_PREFIX SQL_ENG
 
 #include "sql/engine/file_scan/ob_glob_file_table_reader.h"
+#include "share/ob_errno.h"
 
 #include <dirent.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <sys/stat.h>
@@ -48,12 +50,13 @@ int dup_string(ObIAllocator &alloc, const ObString &src, ObString &dst)
   } else if (src.empty()) {
     dst = src;
   } else {
-    char *buf = static_cast<char *>(alloc.alloc(src.length()));
+    char *buf = static_cast<char *>(alloc.alloc(src.length() + 1));
     if (OB_ISNULL(buf)) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
       LOG_WARN("failed to alloc memory for string", K(src.length()), K(ret));
     } else {
       MEMCPY(buf, src.ptr(), src.length());
+      buf[src.length()] = '\0';
       dst.assign_ptr(buf, static_cast<int32_t>(src.length()));
     }
   }
@@ -187,6 +190,9 @@ int GlobFileTableReader::init(const ObString &path, const FileReadOptions &optio
     LOG_WARN("failed to copy glob pattern", K(ret));
   } else {
     options_.max_rows_ = options.max_rows_;
+    if (OB_FAIL(dup_string(alloc_, options.secure_root_, options_.secure_root_))) {
+      return ret;
+    }
     inited_ = true;
   }
   if (OB_SUCC(ret)) {
@@ -336,6 +342,18 @@ int GlobFileTableReader::scan_files_()
         if (0 != ::stat(full_path, &st) || !S_ISREG(st.st_mode)) {
           continue;
         }
+        char canonical[MAX_GLOB_PATH_LEN];
+        if (nullptr == ::realpath(full_path, canonical)) {
+          ret = OB_FILE_NOT_EXIST;
+          break;
+        }
+        const ObString resolved(canonical);
+        const ObString &root = options_.secure_root_;
+        if (!root.empty() && (!resolved.prefix_match(root)
+            || (root != "/" && resolved.length() > root.length() && resolved[root.length()] != '/'))) {
+          ret = OB_ERR_NO_PRIVILEGE;
+          break;
+        }
         if (matched_files_.count() >= OB_FILE_TABLE_MAX_FILE_COUNT) {
           ret = OB_SIZE_OVERFLOW;
           LOG_USER_ERROR(OB_SIZE_OVERFLOW);
@@ -361,7 +379,7 @@ int GlobFileTableReader::scan_files_()
   }
   if (OB_SUCC(ret) && matched_files_.count() > 1) {
     // sort the matched paths so that the iteration order is deterministic
-    lib::ob_sort(matched_files_.begin(), matched_files_.end(), PathLess());
+    lib::ob_sort(&matched_files_.at(0), &matched_files_.at(0) + matched_files_.count(), PathLess());
   }
   return ret;
 }
