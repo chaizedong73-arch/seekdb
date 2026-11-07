@@ -59,7 +59,8 @@ int collect_ai_depend_columns(
       ret = OB_ERR_UNEXPECTED;
       SQL_RESV_LOG(WARN, "invalid column ref node in ai expression", K(ret));
     } else {
-      common::ObString col_name = node->children_[node->num_child_ - 1]->str_value_;
+      const ParseNode *name_node = node->children_[node->num_child_ - 1];
+      common::ObString col_name(name_node->str_len_, name_node->str_value_);
       bool found = false;
       for (int64_t i = 0; !found && i < dep_cols.count(); ++i) {
         found = (dep_cols.at(i).case_compare(col_name) == 0);
@@ -94,6 +95,7 @@ bool is_ai_column_target_type_valid(
 }
 }; // end anonymous namespace
 } // end namespace sql
+} // end namespace oceanbase
 
 namespace oceanbase
 {
@@ -1861,39 +1863,39 @@ int ObDDLResolver::resolve_ai_column_definition(
       || OB_ISNULL(expr_node->children_[1])
       || OB_ISNULL(options_node) || T_AI_COLUMN_OPTIONS != options_node->type_) {
     ret = OB_ERR_AI_COLUMN_INVALID_DEF;
-    LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name());
+    LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name_str().length(), column.get_column_name_str().ptr());
     SQL_RESV_LOG(WARN, "invalid ai column expression node", K(ret));
   } else {
-    common::ObString func_name = expr_node->children_[0]->str_value_;
+    common::ObString func_name(expr_node->children_[0]->str_len_, expr_node->children_[0]->str_value_);
     ParseNode *params_node = expr_node->children_[1];
     int64_t param_cnt = params_node->num_child_;
     if (func_name.case_compare("ai_complete") != 0
         && func_name.case_compare("ai_embed") != 0) {
       ret = OB_ERR_AI_COLUMN_INVALID_DEF;
-      LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name());
+      LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name_str().length(), column.get_column_name_str().ptr());
       SQL_RESV_LOG(WARN, "ai column only supports AI_COMPLETE and AI_EMBED function",
                    K(ret), K(func_name));
     } else if (param_cnt < 2 || param_cnt > 3) {
       ret = OB_ERR_AI_COLUMN_INVALID_DEF;
-      LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name());
+      LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name_str().length(), column.get_column_name_str().ptr());
       SQL_RESV_LOG(WARN, "ai column function takes 2 or 3 arguments",
                    K(ret), K(func_name), K(param_cnt));
     } else if (OB_ISNULL(params_node->children_[0])
-               || T_STRING != params_node->children_[0]->type_
-               || params_node->children_[0]->str_value_.empty()) {
+               || T_VARCHAR != params_node->children_[0]->type_
+               || params_node->children_[0]->str_len_ <= 0) {
       ret = OB_ERR_AI_COLUMN_INVALID_DEF;
-      LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name());
+      LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name_str().length(), column.get_column_name_str().ptr());
       SQL_RESV_LOG(WARN, "the first argument of ai function must be a model name string", K(ret));
     } else if (!is_ai_column_target_type_valid(column, func_name)) {
       ret = OB_ERR_AI_COLUMN_INVALID_DEF;
-      LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name());
+      LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name_str().length(), column.get_column_name_str().ptr());
       SQL_RESV_LOG(WARN, "the type of ai column does not match the result type of ai function",
                    K(ret), K(func_name), K(column.get_data_type()));
     } else {
       AIColumnMeta meta;
       meta.func_ = func_name;
       meta.expr_ = common::ObString(expr_node->str_len_, expr_node->str_value_);
-      meta.model_id_ = params_node->children_[0]->str_value_;
+      meta.model_id_.assign_ptr(params_node->children_[0]->str_value_, params_node->children_[0]->str_len_);
       meta.sync_mode_ = common::ObString(AI_COLUMN_DEFAULT_SYNC_MODE);
       meta.max_retries_ = AI_COLUMN_DEFAULT_MAX_RETRIES;
       meta.def_version_ = 1;
@@ -1902,18 +1904,20 @@ int ObDDLResolver::resolve_ai_column_definition(
         ParseNode *option_node = options_node->children_[i];
         if (OB_ISNULL(option_node)) {
           // option not specified
-        } else if (T_STRING == option_node->type_) {
-          if (option_node->str_value_.case_compare("sync_mode") != 0) {
+        } else if (T_VARCHAR == option_node->type_) {
+          if (common::ObString(option_node->str_len_, option_node->str_value_).case_compare("sync_mode") != 0
+              || option_node->num_child_ != 1 || OB_ISNULL(option_node->children_[0])) {
             ret = OB_ERR_AI_COLUMN_INVALID_DEF;
-            LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name());
+            LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name_str().length(), column.get_column_name_str().ptr());
             SQL_RESV_LOG(WARN, "unknown ai column option", K(ret), K(option_node->str_value_));
           } else {
-            meta.sync_mode_ = option_node->str_value_;
+            meta.sync_mode_.assign_ptr(option_node->children_[0]->str_value_, option_node->children_[0]->str_len_);
           }
         } else if (T_INT == option_node->type_) {
-          if (option_node->value_ < 0) {
+          if (common::ObString(option_node->str_len_, option_node->str_value_).case_compare("max_retries") != 0
+              || option_node->value_ < 0) {
             ret = OB_ERR_AI_COLUMN_INVALID_DEF;
-            LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name());
+            LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name_str().length(), column.get_column_name_str().ptr());
             SQL_RESV_LOG(WARN, "invalid max_retries value for ai column",
                          K(ret), K(option_node->value_));
           } else {
@@ -1926,7 +1930,7 @@ int ObDDLResolver::resolve_ai_column_definition(
       }
       if (OB_SUCC(ret) && !meta.is_async_mode()) {
         ret = OB_ERR_AI_COLUMN_INVALID_DEF;
-        LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name());
+        LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name_str().length(), column.get_column_name_str().ptr());
         SQL_RESV_LOG(WARN, "only async sync_mode is supported for ai column",
                      K(ret), K(meta.sync_mode_));
       }
@@ -1940,11 +1944,11 @@ int ObDDLResolver::resolve_ai_column_definition(
           common::ObString dep_name = dep_cols.at(i);
           if (dep_name.case_compare(column.get_column_name()) == 0) {
             ret = OB_ERR_AI_COLUMN_INVALID_DEF;
-            LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name());
+            LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name_str().length(), column.get_column_name_str().ptr());
             SQL_RESV_LOG(WARN, "ai column can not depend on itself", K(ret), K(dep_name));
           } else if (OB_ISNULL(table_schema.get_column_schema(dep_name))) {
             ret = OB_ERR_AI_COLUMN_INVALID_DEF;
-            LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name());
+            LOG_USER_ERROR(OB_ERR_AI_COLUMN_INVALID_DEF, column.get_column_name_str().length(), column.get_column_name_str().ptr());
             SQL_RESV_LOG(WARN, "ai column depend on unknown column", K(ret), K(dep_name));
           } else if (OB_FAIL(meta.dep_cols_.push_back(dep_name))) {
             SQL_RESV_LOG(WARN, "fail to push back ai depend column", K(ret), K(dep_name));
@@ -1967,11 +1971,12 @@ int ObDDLResolver::resolve_ai_column_definition(
             ObObj default_value;
             default_value.set_varchar(ObString(static_cast<int32_t>(json_str.length()), buf));
             default_value.set_collation_type(CS_TYPE_UTF8MB4_BIN);
-            default_value.meta_.set_length(-1);
-            default_value.meta_.is_explicit_default(true);
-            column.set_cur_default_value(default_value);
-            column.set_nullable(true);
-            column.add_column_flag(AI_COLUMN_FLAG);
+            if (OB_FAIL(column.set_cur_default_value(default_value, false))) {
+              SQL_RESV_LOG(WARN, "failed to store AI column metadata", K(ret));
+            } else {
+              column.set_nullable(true);
+              column.add_column_flag(AI_COLUMN_FLAG);
+            }
           }
         }
       }

@@ -20,6 +20,7 @@
 #include "sql/optimizer/ob_logical_operator.h"
 #include "sql/optimizer/ob_log_operator_factory.h"
 #include "sql/parser/ob_item_type.h"
+#include "sql/resolver/dml/ob_select_stmt.h"
 
 namespace oceanbase
 {
@@ -165,6 +166,8 @@ public:
     return external_properties_;
   }
   const common::ObIArray<ObRawExpr*> &get_select_exprs() const { return select_exprs_; }
+  void set_copy_csv(const CopyCsvOptions &options) { copy_csv_ = options; }
+  const CopyCsvOptions &get_copy_csv() const { return copy_csv_; }
   common::ObIArray<ObRawExpr*> &get_select_exprs() { return select_exprs_; }
   virtual int est_cost() override;
   virtual int compute_plan_type() override;
@@ -188,6 +191,7 @@ private:
   common::ObCollationType cs_type_;
   bool is_overwrite_;
   common::ObString external_properties_;
+  CopyCsvOptions copy_csv_;
 };
 }
 }

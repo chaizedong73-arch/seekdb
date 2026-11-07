@@ -15,8 +15,11 @@
  */
 
 #define USING_LOG_PREFIX SQL_ENG
+#include <cmath>
 #include "ob_ai_func_utils.h"
 #include "ob_ai_func_client.h"
+#include "lib/string/ob_sql_string.h"
+#include "lib/utility/ob_smart_call.h"
 #include "query/engine/expr/ob_ai_model_resolver.h"
 
 namespace oceanbase
@@ -1662,9 +1665,13 @@ int ObAIFuncUtils::check_embedding_vector(ObIJsonBase *j_base,
     }
     for (uint64_t i = 0; OB_SUCC(ret) && i < embedding_size; i++) {
       ObIJsonBase *value = nullptr;
+      double numeric_value = 0.0;
       if (OB_FAIL(json_reader.get_array_element(j_base, i, value))) {
       } else if (!share::ObJsonHelper::is_number_type(value)) {
         ret = OB_ERR_UNEXPECTED;
+      } else if (OB_FAIL(value->to_double(numeric_value))) {
+      } else if (!std::isfinite(numeric_value)) {
+        ret = OB_INVALID_ARGUMENT;
       }
     }
   }
@@ -1786,7 +1793,7 @@ int ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(ObIAllocator &al
   ObJsonArray *args_array = NULL;
   ObString template_str;
   ObString result_str;
-  if (OB_ISNULL(prompt_object) ||
+  if (!is_valid_prompt_object(prompt_object) ||
       OB_ISNULL(template_json_str = static_cast<ObJsonString *>(prompt_object->get_value(ObAIFuncPromptObjectUtils::prompt_template_key))) ||
       OB_ISNULL(args_array = static_cast<ObJsonArray *>(prompt_object->get_value(ObAIFuncPromptObjectUtils::prompt_args_key))) ||
       OB_ISNULL(template_str = template_json_str->get_str()) ||
@@ -1795,8 +1802,6 @@ int ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(ObIAllocator &al
     LOG_WARN("invalid argument", K(ret));
   } else {
     uint64_t args_count = args_array->element_count();
-    int64_t max_result_len = template_str.length();
-    char *result_buf = NULL;
     // string args are replaced by their raw text, while JSON object/array args
     // are embedded as raw JSON values instead of strings with quotes
     ObArray<ObString> arg_values;
@@ -1810,23 +1815,24 @@ int ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(ObIAllocator &al
           ObJsonString *arg_str = static_cast<ObJsonString *>(arg_node);
           if (OB_FAIL(arg_values.push_back(arg_str->get_str()))) {
           }
+        } else if (arg_node->json_type() == ObJsonNodeType::J_OBJECT &&
+                   is_valid_prompt_object(static_cast<ObJsonObject *>(arg_node))) {
+          ObString nested_prompt;
+          if (OB_FAIL(SMART_CALL(replace_all_str_args_in_template(
+                  allocator, static_cast<ObJsonObject *>(arg_node), nested_prompt)))) {
+          } else if (OB_FAIL(arg_values.push_back(nested_prompt))) {
+          }
         } else {
           ObString arg_json_str;
           if (OB_FAIL(ObAIFuncJsonUtils::print_json_to_str(allocator, arg_node, arg_json_str))) {
           } else if (OB_FAIL(arg_values.push_back(arg_json_str))) {
           }
         }
-        if (OB_SUCC(ret)) {
-          max_result_len += arg_values.at(i).length();
-        }
       }
     }
     if (OB_FAIL(ret)) {
-    } else if (OB_ISNULL(result_buf = static_cast<char *>(allocator.alloc(max_result_len)))) {
-      ret = OB_ALLOCATE_MEMORY_FAILED;
-      LOG_WARN("fail to allocate memory for result buffer", K(ret), K(max_result_len));
     } else {
-      int64_t result_pos = 0;
+      ObSqlString result_buffer;
       const char *template_ptr = template_str.ptr();
       int64_t template_len = template_str.length();
 
@@ -1863,11 +1869,7 @@ int ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(ObIAllocator &al
               // repeated placeholders are all replaced with the same arg value
               ObString arg_value = arg_values.at(static_cast<uint64_t>(index));
 
-              if (result_pos + arg_value.length() <= max_result_len) {
-                MEMCPY(result_buf + result_pos, arg_value.ptr(), arg_value.length());
-                result_pos += arg_value.length();
-              } else {
-                ret = OB_BUF_NOT_ENOUGH;
+              if (OB_FAIL(result_buffer.append(arg_value))) {
               }
 
               i = end_pos;
@@ -1877,25 +1879,20 @@ int ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(ObIAllocator &al
               LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_prompt: invalid placeholder index");
             }
           } else {
-            if (result_pos < max_result_len) {
-              result_buf[result_pos++] = template_ptr[i];
-            } else {
-              ret = OB_BUF_NOT_ENOUGH;
-              LOG_WARN("result buffer not enough", K(ret), K(result_pos), K(max_result_len));
+            if (OB_FAIL(result_buffer.append(template_ptr + i, 1))) {
             }
           }
         } else {
-          if (result_pos < max_result_len) {
-            result_buf[result_pos++] = template_ptr[i];
-          } else {
-            ret = OB_BUF_NOT_ENOUGH;
-            LOG_WARN("result buffer not enough", K(ret), K(result_pos), K(max_result_len));
+          if (OB_FAIL(result_buffer.append(template_ptr + i, 1))) {
           }
         }
       }
 
       if (OB_SUCC(ret)) {
-        replaced_prompt_str.assign_ptr(result_buf, static_cast<int32_t>(result_pos));
+        if (result_buffer.length() > INT32_MAX) {
+          ret = OB_SIZE_OVERFLOW;
+        } else if (OB_FAIL(ob_write_string(allocator, result_buffer.string(), replaced_prompt_str))) {
+        }
       }
     }
   }

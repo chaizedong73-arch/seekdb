@@ -7916,7 +7916,7 @@ int ObDMLResolver::resolve_function_table_column_item_file(const TableItem &tabl
     const ObConstRawExpr *const_expr = static_cast<const ObConstRawExpr *>(
         function_table_expr->get_param_expr(0));
     const ObObj &path_obj = const_expr->get_value();
-    if (OB_UNLIKELY(!path_obj.is_string())) {
+    if (OB_UNLIKELY(!path_obj.is_string_type())) {
       ret = OB_INVALID_ARGUMENT;
       LOG_USER_ERROR(OB_INVALID_ARGUMENT,
           "path of file table function. The path should be a string");
@@ -7924,38 +7924,18 @@ int ObDMLResolver::resolve_function_table_column_item_file(const TableItem &tabl
       path = path_obj.get_string();
     }
   }
-  // 3. check secure_file_priv
-  if (OB_FAIL(ret)) {
-  } else {
-    ObString secure_file_priv;
-    ObString check_path = path;
-    if (OB_FAIL(session_info_->get_sys_variable(SYS_VAR_SECURE_FILE_PRIV, secure_file_priv))) {
-      LOG_WARN("failed to get sys variable secure_file_priv", K(ret));
-    } else if (FILE_TABLE_GLOB == format) {
-      // glob pattern: check its directory prefix only
-      int64_t sep_pos = -1;
-      for (int64_t i = path.length() - 1; i >= 0; --i) {
-        if ('/' == *(path.ptr() + i) || '\\' == *(path.ptr() + i)) {
-          sep_pos = i;
-          break;
-        }
-      }
-      if (sep_pos > 0) {
-        check_path.assign_ptr(path.ptr(), static_cast<int32_t>(sep_pos));
-      }
-    }
-    if (OB_FAIL(ret)) {
-    } else if (OB_FAIL(ObResolverUtils::check_secure_path(secure_file_priv, check_path))) {
-      LOG_WARN("path is not allowed by secure_file_priv", K(check_path), K(ret));
-    }
-  }
   // 4. create reader and sample the schema of the file table
   ObSEArray<FileColumnMeta, 16> col_metas;
   if (OB_FAIL(ret)) {
   } else {
-    FileReadOptions options; // default options for now
+    FileReadOptions options;
     IFileTableReader *reader = NULL;
-    if (OB_FAIL(create_file_table_reader(format, *allocator_, reader))) {
+    if (OB_FAIL(FileTableFuncExpr::get_read_options(*function_table_expr, options))) {
+      LOG_WARN("invalid file reader options", K(ret));
+    } else if (OB_FAIL(FileTableFuncExpr::validate_path(*session_info_, *allocator_,
+                        format, path, options))) {
+      LOG_WARN("file access denied", K(ret));
+    } else if (OB_FAIL(create_file_table_reader(format, *allocator_, reader))) {
       LOG_WARN("failed to create file table reader", K(format), K(ret));
     } else if (OB_FAIL(reader->init(path, options))) {
       LOG_WARN("failed to init file table reader", K(path), K(ret));

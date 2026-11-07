@@ -17,12 +17,8 @@
 #define USING_LOG_PREFIX SERVER_OMT
 
 
-<<<<<<< HEAD
-=======
 #include "share/ob_server_struct.h"
 #include "share/ob_ai_column_service.h"
-#include "rust/config.h"
->>>>>>> 9ccb288f3 (feat: async AI COLUMN (DDL, DML linkage, worker service, retry, strict read))
 #include "lib/stat/ob_diagnostic_info_guard.h"
 #include "ob_server_runtime_controller.h"
 #include "storage/tx_storage/ob_memstore_freezer.h"

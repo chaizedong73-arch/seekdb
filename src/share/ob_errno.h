@@ -1215,6 +1215,7 @@ constexpr int OB_AI_FUNC_MODEL_EXISTS = -11119;
 constexpr int OB_ERR_AI_COLUMN_NOT_READY = -11120;
 constexpr int OB_ERR_AI_COLUMN_DIRECT_ASSIGN = -11121;
 constexpr int OB_ERR_AI_COLUMN_NOT_EXISTS = -11122;
+constexpr int OB_ERR_AI_COLUMN_INVALID_DEF = -11123;
 constexpr int OB_CLOB_ONLY_SUPPORT_WITH_MULTIBYTE_FUN = -22998;
 constexpr int OB_ERR_UPDATE_TWICE = -30926;
 constexpr int OB_ERR_SNAPSHOT_QUERY_WITH_UPDATE = -32491;
@@ -2767,6 +2768,7 @@ constexpr int OB_ERR_INVALID_DATE_MSG_FMT_V2 = -4219;
 #define OB_ERR_AI_COLUMN_NOT_READY__USER_ERROR_MSG "AI column \'%.*s\' is not ready, its value is still being computed by AI"
 #define OB_ERR_AI_COLUMN_DIRECT_ASSIGN__USER_ERROR_MSG "Cannot assign value to AI column \'%.*s\' directly, it is computed by AI asynchronously"
 #define OB_ERR_AI_COLUMN_NOT_EXISTS__USER_ERROR_MSG "AI column \'%.*s\' does not exist in table \'%.*s\' or is not an AI column"
+#define OB_ERR_AI_COLUMN_INVALID_DEF__USER_ERROR_MSG "Invalid AI column definition for \'%.*s\'"
 #define OB_CLOB_ONLY_SUPPORT_WITH_MULTIBYTE_FUN__USER_ERROR_MSG "CLOB or NCLOB in multibyte character set not supported"
 #define OB_ERR_UPDATE_TWICE__USER_ERROR_MSG "unable to get a stable set of rows in the source tables"
 #define OB_ERR_SNAPSHOT_QUERY_WITH_UPDATE__USER_ERROR_MSG "snapshot expression not allowed here"
@@ -2775,7 +2777,7 @@ constexpr int OB_ERR_INVALID_DATE_MSG_FMT_V2 = -4219;
 #define OB_ERR_DATA_TOO_LONG_MSG_FMT_V2__USER_ERROR_MSG "Data too long for column '%.*s' at row %ld"
 #define OB_ERR_INVALID_DATE_MSG_FMT_V2__USER_ERROR_MSG "Incorrect datetime value for column '%.*s' at row %ld"
 
-extern int g_all_ob_errnos[1545];
+extern int g_all_ob_errnos[1549];
 
   const char *ob_error_name(const int oberr);
   const char* ob_error_cause(const int oberr);

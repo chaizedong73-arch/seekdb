@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SQL_ENG
 
 #include "sql/engine/file_scan/ob_json_file_table_reader.h"
+#include "share/ob_errno.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -120,12 +121,13 @@ int JsonFileTableReader::dup_string_(const ObString &src, ObString &dst)
   } else if (src.empty()) {
     dst = src;
   } else {
-    char *buf = static_cast<char *>(alloc_.alloc(src.length()));
+    char *buf = static_cast<char *>(alloc_.alloc(src.length() + 1));
     if (OB_ISNULL(buf)) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
       LOG_WARN("failed to alloc memory for string", K(src.length()), K(ret));
     } else {
       MEMCPY(buf, src.ptr(), static_cast<size_t>(src.length()));
+      buf[src.length()] = '\0';
       dst.assign_ptr(buf, static_cast<int32_t>(src.length()));
     }
   }
@@ -807,6 +809,12 @@ int JsonFileTableReader::get_file_stat(FileTableFileStat &stat) const
     } else {
       stat.file_size_ = static_cast<int64_t>(st.st_size);
       stat.last_modify_time_ = static_cast<int64_t>(st.st_mtime);
+      stat.inode_ = st.st_ino;
+#if defined(__linux__)
+      stat.modify_nsec_ = st.st_mtim.tv_nsec;
+#elif defined(__APPLE__)
+      stat.modify_nsec_ = st.st_mtimespec.tv_nsec;
+#endif
     }
   }
   return ret;

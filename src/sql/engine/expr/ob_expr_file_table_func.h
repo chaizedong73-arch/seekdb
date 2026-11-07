@@ -23,6 +23,7 @@ namespace oceanbase
 {
 namespace sql
 {
+class ObSQLSessionInfo;
 
 /**
  * @brief Base class of file table functions, such as read_csv('a.csv') and
@@ -38,9 +39,8 @@ public:
   FileTableFuncExpr(common::ObIAllocator &alloc, ObExprOperatorType type, const char *name);
   virtual ~FileTableFuncExpr();
 
-  virtual int calc_result_type1(ObExprResType &type,
-                                ObExprResType &path,
-                                common::ObExprTypeCtx &type_ctx) const;
+  virtual int calc_result_typeN(ObExprResType &type, ObExprResType *args,
+                               int64_t count, common::ObExprTypeCtx &type_ctx) const override;
   // the path argument must be a constant string, no runtime scalar evaluation
   virtual int cg_expr(ObExprCGCtx &expr_cg_ctx,
                       const ObRawExpr &raw_expr,
@@ -51,6 +51,11 @@ public:
   // returns the file table format of the given operator type,
   // FILE_TABLE_MAX_FORMAT is returned when the type is not a file table function
   static FileTableFormat get_format_by_expr_type(ObExprOperatorType type);
+  static int get_read_options(const ObRawExpr &expr, FileReadOptions &options);
+  static int get_read_options(const ObExpr &expr, ObEvalCtx &ctx, FileReadOptions &options);
+  static int validate_path(ObSQLSessionInfo &session, common::ObIAllocator &allocator,
+                                FileTableFormat format, common::ObString &path,
+                                FileReadOptions &options, bool allow_missing_file = false);
 
 private:
   DISALLOW_COPY_AND_ASSIGN(FileTableFuncExpr);

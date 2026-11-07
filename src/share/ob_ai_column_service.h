@@ -46,6 +46,7 @@ struct AIColumnTask
   uint64_t table_id_;
   common::ObString column_name_;
   common::ObString where_cond_;
+  TO_STRING_KV(K_(table_id), K_(column_name), K_(where_cond));
 };
 
 // Async AI column background service.
@@ -84,6 +85,7 @@ public:
   // notify that the given table was modified; cheap no-op when the table is
   // known to have no AI column
   int notify_dml(uint64_t table_id);
+  bool has_ai_column_table(uint64_t table_id);
 
   virtual void runTimerTask() override;
 
@@ -98,6 +100,7 @@ private:
     common::ObString column_name_; // deep copied into task_allocator_
     int64_t fail_count_;
     bool failed_;
+    TO_STRING_KV(K_(table_id), K_(column_name), K_(fail_count), K_(failed));
   };
 
   int do_full_scan();

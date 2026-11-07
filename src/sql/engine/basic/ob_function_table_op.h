@@ -21,6 +21,7 @@
 #include "sql/engine/basic/ob_chunk_datum_store.h"
 #include "sql/engine/file_scan/file_table_reader.h"
 #include "lib/charset/ob_charset.h"
+#include "sql/pl/ob_pl_user_type.h"
 
 namespace oceanbase
 {

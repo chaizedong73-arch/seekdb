@@ -19,6 +19,7 @@
 #include <stdio.h>
 
 #include "sql/engine/file_scan/file_table_reader.h"
+#include "sql/engine/file_scan/ob_file_table_type_infer.h"
 
 namespace oceanbase
 {

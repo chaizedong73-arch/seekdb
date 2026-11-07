@@ -19,6 +19,7 @@
 #include <stdio.h>
 
 #include "sql/engine/file_scan/file_table_reader.h"
+#include "sql/engine/file_scan/ob_file_table_type_infer.h"
 
 namespace oceanbase
 {
@@ -65,7 +66,7 @@ private:
   int infer_schema_();
   // parse the current line (line_buf_) as one flat json object; every parsed
   // key/value pair is reported through handle_kv_()
-  int parse_json_line_(bool for_infer);
+  int parse_json_line_(bool for_infer, bool &is_blank);
   // parse a json string literal starting at pos, the decoded value is appended
   // to val_buf_; text points into val_buf_ (for decoded strings) or line_buf_
   // (for raw tokens)

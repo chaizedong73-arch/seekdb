@@ -15,7 +15,7 @@
  */
 
 #include <gtest/gtest.h>
-#include "ob_expr_test_utils.h"
+#include "lib/allocator/page_arena.h"
 #include "sql/engine/expr/ob_expr_ai/ob_ai_func_utils.h"
 
 
@@ -83,4 +83,47 @@ TEST_F(ObAIPromptTest, test_replace_all_str_args_in_template)
   ASSERT_EQ(result_str, "1+2=3 吗？请回答true或false");
   // std::cout << "prompt_str: " << prompt_str.ptr() << std::endl;
   // std::cout << "result_str: " << result_str.ptr() << std::endl;
+}
+
+TEST_F(ObAIPromptTest, repeated_long_json_arguments)
+{
+  ObArenaAllocator allocator(ObModIds::TEST);
+  ObString raw("{\"template\":\"{0}/{0}/{0}/{1}\","
+               "\"args\":[\"abcdefghijklmnopqrstuvwx\",{\"k\":2}]}");
+  ObJsonObject *prompt = nullptr;
+  ObString result;
+  ASSERT_EQ(OB_SUCCESS, ObAIFuncJsonUtils::get_json_object_form_str(allocator, raw, prompt));
+  ASSERT_EQ(OB_SUCCESS, ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(
+                           allocator, prompt, result));
+  ASSERT_EQ(ObString("abcdefghijklmnopqrstuvwx/abcdefghijklmnopqrstuvwx/"
+                     "abcdefghijklmnopqrstuvwx/{\"k\":2}"), result);
+}
+
+TEST_F(ObAIPromptTest, json_array_is_one_argument)
+{
+  ObArenaAllocator allocator(ObModIds::TEST);
+  ObString raw("{\"template\":\"{0}/{0}/{1}\",\"args\":[[1,true],{\"k\":2}]}");
+  ObJsonObject *prompt = nullptr;
+  ObString result;
+  ASSERT_EQ(OB_SUCCESS, ObAIFuncJsonUtils::get_json_object_form_str(allocator, raw, prompt));
+  ASSERT_EQ(OB_SUCCESS, ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(
+                           allocator, prompt, result));
+  ASSERT_EQ(ObString("[1,true]/[1,true]/{\"k\":2}"), result);
+}
+
+TEST_F(ObAIPromptTest, nested_prompt_and_invalid_index)
+{
+  ObArenaAllocator allocator(ObModIds::TEST);
+  ObString raw("{\"template\":\"outer({0})\","
+               "\"args\":[{\"template\":\"inner:{0}\",\"args\":[\"value\"]}]}");
+  ObJsonObject *prompt = nullptr;
+  ObString result;
+  ASSERT_EQ(OB_SUCCESS, ObAIFuncJsonUtils::get_json_object_form_str(allocator, raw, prompt));
+  ASSERT_EQ(OB_SUCCESS, ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(
+                           allocator, prompt, result));
+  ASSERT_EQ(ObString("outer(inner:value)"), result);
+  ObJsonString invalid(ObString("{99999999999999999999999999999999}"));
+  ASSERT_EQ(OB_SUCCESS, prompt->add(ObAIFuncPromptObjectUtils::prompt_template_key, &invalid));
+  ASSERT_EQ(OB_INVALID_ARGUMENT, ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(
+                                    allocator, prompt, result));
 }

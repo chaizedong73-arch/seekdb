@@ -44,7 +44,7 @@ enum FileTableFormat
 constexpr int64_t OB_FILE_TABLE_MAX_COLUMN_COUNT = 4096;
 constexpr int64_t OB_FILE_TABLE_MAX_FILE_SIZE = 64LL << 30; // 64GB
 constexpr int64_t OB_FILE_TABLE_MAX_FILE_COUNT = 10000;     // max files matched by a glob pattern
-constexpr int64_t OB_FILE_TABLE_DEFAULT_SAMPLE_SIZE = 128;
+constexpr int64_t OB_FILE_TABLE_DEFAULT_SAMPLE_SIZE = -1;
 
 /**
  * @brief Schema meta of one column sampled from a file table.
@@ -55,6 +55,7 @@ struct FileColumnMeta
   {}
   common::ObString name_;
   common::ObObjMeta type_;
+  TO_STRING_KV(K_(name), K_(type));
 };
 
 /**
@@ -63,7 +64,7 @@ struct FileColumnMeta
 struct FileReadOptions
 {
   FileReadOptions()
-      : parse_header_(false),
+      : parse_header_(true),
         field_delimiter_(","),
         line_delimiter_("\n"),
         quote_char_("\""),
@@ -78,20 +79,25 @@ struct FileReadOptions
   common::ObString quote_char_;      // csv quote char, default "\""
   common::ObString escape_char_;     // csv escape char, default "\\"
   common::ObString null_str_;        // string literal that represents null value
-  int64_t sample_size_;              // rows sampled for schema inference (json/parquet)
+  common::ObString secure_root_;     // canonical root checked again for glob matches
+  int64_t sample_size_;              // only -1 (full schema inference) is supported
   int64_t max_rows_;                 // -1 means unlimited
 };
+
+int parse_file_read_options(const common::ObIArray<common::ObObj> &args,
+                           FileReadOptions &options);
 
 /**
  * @brief Snapshot of a file used for change detection between rescans.
  */
 struct FileTableFileStat
 {
-  FileTableFileStat() : file_size_(0), last_modify_time_(0)
+  FileTableFileStat() : file_size_(0), last_modify_time_(0), modify_nsec_(0), inode_(0)
   {}
   bool operator==(const FileTableFileStat &other) const
   {
-    return file_size_ == other.file_size_ && last_modify_time_ == other.last_modify_time_;
+    return file_size_ == other.file_size_ && last_modify_time_ == other.last_modify_time_
+        && modify_nsec_ == other.modify_nsec_ && inode_ == other.inode_;
   }
   bool operator!=(const FileTableFileStat &other) const
   {
@@ -99,6 +105,8 @@ struct FileTableFileStat
   }
   int64_t file_size_;
   int64_t last_modify_time_;
+  int64_t modify_nsec_;
+  uint64_t inode_;
 };
 
 /**

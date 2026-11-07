@@ -45,6 +45,8 @@ int SelectItem::deep_copy(ObIRawExprCopier &expr_copier,
   return ret;
 }
 
+OB_SERIALIZE_MEMBER(CopyCsvOptions, enabled_, header_line_, null_string_);
+
 int ObSelectIntoItem::deep_copy(ObIAllocator &allocator,
                                 ObIRawExprCopier &copier,
                                 const ObSelectIntoItem &other)
@@ -63,6 +65,7 @@ int ObSelectIntoItem::deep_copy(ObIAllocator &allocator,
   buffer_size_ = other.buffer_size_;
   user_vars_.assign(other.user_vars_);
   if (OB_FAIL(ob_write_string(allocator, other.external_properties_, external_properties_))) {
+  } else if (OB_FAIL(copy_csv_.deep_copy(allocator, other.copy_csv_))) {
   }
   for (int64_t i = 0; OB_SUCC(ret) && i < other.pl_vars_.count(); ++i) {
     ObRawExpr* pl_var;

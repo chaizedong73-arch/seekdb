@@ -1892,6 +1892,7 @@ DEFINE_ERROR_EXT(OB_AI_FUNC_MODEL_EXISTS, -11119, -1, "HY000", "This ai model is
 DEFINE_ERROR_EXT(OB_ERR_AI_COLUMN_NOT_READY, -11120, -1, "HY000", "AI column value is not ready", "AI column \'%.*s\' is not ready, its value is still being computed by AI");
 DEFINE_ERROR_EXT(OB_ERR_AI_COLUMN_DIRECT_ASSIGN, -11121, -1, "HY000", "Cannot assign value to AI column directly", "Cannot assign value to AI column \'%.*s\' directly, it is computed by AI asynchronously");
 DEFINE_ERROR_EXT(OB_ERR_AI_COLUMN_NOT_EXISTS, -11122, -1, "HY000", "AI column does not exist", "AI column \'%.*s\' does not exist in table \'%.*s\' or is not an AI column");
+DEFINE_ERROR_EXT(OB_ERR_AI_COLUMN_INVALID_DEF, -11123, -1, "HY000", "Invalid AI column definition", "Invalid AI column definition for \'%.*s\'");
 // 余留位置
 ////////////////////////////////////////////////////////////////
 // SQL扩展区段1：[-11000, -12000)

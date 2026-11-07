@@ -134,7 +134,7 @@ static int get_file_table_column_names(const ObRawExpr *table_expr,
     const ObObj &path_obj = const_expr->get_value();
     FileTableFormat format = FileTableFuncExpr::get_format_by_expr_type(
         table_expr->get_expr_type());
-    if (OB_UNLIKELY(!path_obj.is_string())) {
+    if (OB_UNLIKELY(!path_obj.is_string_type())) {
       ret = OB_INVALID_ARGUMENT;
       LOG_USER_ERROR(OB_INVALID_ARGUMENT,
           "path of file table function. The path should be a string");
@@ -143,10 +143,17 @@ static int get_file_table_column_names(const ObRawExpr *table_expr,
       LOG_WARN("invalid file table function type", K(ret));
     } else {
       ObString path = path_obj.get_string();
-      FileReadOptions options; // default read options for now
+      FileReadOptions options;
       IFileTableReader *reader = NULL;
       ObSEArray<FileColumnMeta, 16> col_metas;
-      if (OB_FAIL(create_file_table_reader(format, *params.allocator_, reader))) {
+      if (OB_FAIL(FileTableFuncExpr::get_read_options(*table_expr, options))) {
+        LOG_WARN("invalid file reader options", K(ret));
+      } else if (OB_ISNULL(params.session_info_)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (OB_FAIL(FileTableFuncExpr::validate_path(*params.session_info_,
+                          *params.allocator_, format, path, options))) {
+        LOG_WARN("file access denied", K(ret));
+      } else if (OB_FAIL(create_file_table_reader(format, *params.allocator_, reader))) {
         LOG_WARN("failed to create file table reader", K(ret));
       } else if (OB_FAIL(reader->init(path, options))) {
         LOG_WARN("failed to init file table reader", K(ret));

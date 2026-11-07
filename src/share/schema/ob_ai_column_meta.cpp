@@ -71,13 +71,14 @@ int build_ai_column_meta_json(
     ObString &json_str)
 {
   int ret = OB_SUCCESS;
-  json::ObJsonObject obj(&allocator);
-  json::ObJsonString func_node(meta.func_);
-  json::ObJsonString expr_node(meta.expr_);
-  json::ObJsonString model_node(meta.model_id_);
-  json::ObJsonString sync_node(meta.sync_mode_);
-  json::ObJsonInt retry_node(meta.max_retries_);
-  json::ObJsonInt version_node(meta.def_version_);
+  ObJsonObject obj(&allocator);
+  ObJsonString func_node(meta.func_);
+  ObJsonString expr_node(meta.expr_);
+  ObJsonString model_node(meta.model_id_);
+  ObJsonString sync_node(meta.sync_mode_);
+  ObJsonInt retry_node(meta.max_retries_);
+  ObJsonInt version_node(meta.def_version_);
+  ObJsonArray dep_array(&allocator);
   if (OB_FAIL(obj.add(ObString("func"), &func_node))) {
     LOG_WARN("fail to add func to ai column meta json", K(ret));
   } else if (OB_FAIL(obj.add(ObString("expr"), &expr_node))) {
@@ -91,10 +92,12 @@ int build_ai_column_meta_json(
   } else if (OB_FAIL(obj.add(ObString("def_version"), &version_node))) {
     LOG_WARN("fail to add def_version to ai column meta json", K(ret));
   } else {
-    json::ObJsonArray dep_array(&allocator);
     for (int64_t i = 0; OB_SUCC(ret) && i < meta.dep_cols_.count(); ++i) {
-      json::ObJsonString dep_node(meta.dep_cols_.at(i));
-      if (OB_FAIL(dep_array.append(&dep_node))) {
+      ObJsonString dep_node(meta.dep_cols_.at(i));
+      ObJsonNode *stored_dep = dep_node.clone(&allocator, true);
+      if (OB_ISNULL(stored_dep)) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+      } else if (OB_FAIL(dep_array.append(stored_dep))) {
         LOG_WARN("fail to append dep column to ai column meta json", K(ret));
       }
     }
@@ -103,7 +106,7 @@ int build_ai_column_meta_json(
     }
   }
   if (OB_SUCC(ret)) {
-    json::ObJsonBuffer j_buf(&allocator);
+    ObJsonBuffer j_buf(&allocator);
     if (OB_FAIL(obj.print(j_buf, false))) {
       LOG_WARN("fail to print ai column meta json", K(ret));
     } else {
@@ -119,81 +122,82 @@ int parse_ai_column_meta(
     AIColumnMeta &meta)
 {
   int ret = OB_SUCCESS;
+  meta.reset();
   if (json_str.empty()) {
     ret = OB_INVALID_ARGUMENT;
     LOG_WARN("ai column meta json text is empty", K(ret));
   } else {
-    json::ObIJsonBase *base = NULL;
-    if (OB_FAIL(json::ObJsonBaseFactory::get_json_base(
+    ObIJsonBase *base = NULL;
+    if (OB_FAIL(ObJsonBaseFactory::get_json_base(
             &allocator, json_str,
             ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, base))) {
       LOG_WARN("fail to parse ai column meta json text", K(ret), K(json_str));
-    } else if (OB_ISNULL(base) || json::J_OBJECT != base->json_type()) {
+    } else if (OB_ISNULL(base) || ObJsonNodeType::J_OBJECT != base->json_type()) {
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("ai column meta json text is not a json object", K(ret), K(json_str));
     } else {
-      json::ObJsonObject *obj = static_cast<json::ObJsonObject *>(base);
-      json::ObJsonNode *node = NULL;
+      ObJsonObject *obj = static_cast<ObJsonObject *>(base);
+      ObJsonNode *node = NULL;
       if (OB_ISNULL(node = obj->get_value(ObString("func")))
-          || json::J_STRING != node->json_type()) {
+          || ObJsonNodeType::J_STRING != node->json_type()) {
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("ai column meta json has no valid func field", K(ret));
       } else if (OB_FAIL(copy_json_string(allocator,
-                  static_cast<json::ObJsonString *>(node)->value(), meta.func_))) {
+                  static_cast<ObJsonString *>(node)->value(), meta.func_))) {
         LOG_WARN("fail to copy func", K(ret));
       } else if (OB_ISNULL(node = obj->get_value(ObString("expr")))
-          || json::J_STRING != node->json_type()) {
+          || ObJsonNodeType::J_STRING != node->json_type()) {
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("ai column meta json has no valid expr field", K(ret));
       } else if (OB_FAIL(copy_json_string(allocator,
-                  static_cast<json::ObJsonString *>(node)->value(), meta.expr_))) {
+                  static_cast<ObJsonString *>(node)->value(), meta.expr_))) {
         LOG_WARN("fail to copy expr", K(ret));
       } else if (OB_ISNULL(node = obj->get_value(ObString("model")))
-          || json::J_STRING != node->json_type()) {
+          || ObJsonNodeType::J_STRING != node->json_type()) {
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("ai column meta json has no valid model field", K(ret));
       } else if (OB_FAIL(copy_json_string(allocator,
-                  static_cast<json::ObJsonString *>(node)->value(), meta.model_id_))) {
+                  static_cast<ObJsonString *>(node)->value(), meta.model_id_))) {
         LOG_WARN("fail to copy model", K(ret));
       } else if (OB_ISNULL(node = obj->get_value(ObString("sync_mode")))
-          || json::J_STRING != node->json_type()) {
+          || ObJsonNodeType::J_STRING != node->json_type()) {
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("ai column meta json has no valid sync_mode field", K(ret));
       } else if (OB_FAIL(copy_json_string(allocator,
-                  static_cast<json::ObJsonString *>(node)->value(), meta.sync_mode_))) {
+                  static_cast<ObJsonString *>(node)->value(), meta.sync_mode_))) {
         LOG_WARN("fail to copy sync_mode", K(ret));
       } else if (OB_ISNULL(node = obj->get_value(ObString("max_retries")))
-          || json::J_INT != node->json_type()) {
+          || ObJsonNodeType::J_INT != node->json_type()) {
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("ai column meta json has no valid max_retries field", K(ret));
       } else {
-        meta.max_retries_ = static_cast<json::ObJsonInt *>(node)->value();
+        meta.max_retries_ = static_cast<ObJsonInt *>(node)->value();
       }
       if (OB_SUCC(ret)) {
         if (OB_ISNULL(node = obj->get_value(ObString("def_version")))
-            || json::J_INT != node->json_type()) {
+            || ObJsonNodeType::J_INT != node->json_type()) {
           ret = OB_ERR_UNEXPECTED;
           LOG_WARN("ai column meta json has no valid def_version field", K(ret));
         } else {
-          meta.def_version_ = static_cast<json::ObJsonInt *>(node)->value();
+          meta.def_version_ = static_cast<ObJsonInt *>(node)->value();
         }
       }
       if (OB_SUCC(ret)) {
-        json::ObJsonNode *dep_array_node = obj->get_value(ObString("deps"));
-        if (OB_ISNULL(dep_array_node) || json::J_ARRAY != dep_array_node->json_type()) {
+        ObJsonNode *dep_array_node = obj->get_value(ObString("deps"));
+        if (OB_ISNULL(dep_array_node) || ObJsonNodeType::J_ARRAY != dep_array_node->json_type()) {
           ret = OB_ERR_UNEXPECTED;
           LOG_WARN("ai column meta json has no valid deps field", K(ret));
         } else {
-          json::ObJsonArray *dep_array = static_cast<json::ObJsonArray *>(dep_array_node);
+          ObJsonArray *dep_array = static_cast<ObJsonArray *>(dep_array_node);
           for (uint64_t i = 0; OB_SUCC(ret) && i < dep_array->element_count(); ++i) {
-            json::ObJsonNode *dep_node = dep_array->get_value(i);
-            if (OB_ISNULL(dep_node) || json::J_STRING != dep_node->json_type()) {
+            ObJsonNode *dep_node = dep_array->get_value(i);
+            if (OB_ISNULL(dep_node) || ObJsonNodeType::J_STRING != dep_node->json_type()) {
               ret = OB_ERR_UNEXPECTED;
               LOG_WARN("ai column meta json deps contains invalid element", K(ret), K(i));
             } else {
               ObString dep_name;
               if (OB_FAIL(copy_json_string(allocator,
-                          static_cast<json::ObJsonString *>(dep_node)->value(),
+                          static_cast<ObJsonString *>(dep_node)->value(),
                           dep_name))) {
                 LOG_WARN("fail to copy dep column name", K(ret), K(i));
               } else if (OB_FAIL(meta.dep_cols_.push_back(dep_name))) {

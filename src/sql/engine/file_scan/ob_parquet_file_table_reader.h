@@ -162,6 +162,7 @@ private:
     int32_t converted_type_;
     int32_t repetition_;
     int32_t type_length_;
+    TO_STRING_KV(K_(name), K_(pq_type), K_(converted_type), K_(repetition), K_(type_length));
   };
 
   // one column chunk (column x row group)
@@ -175,6 +176,8 @@ private:
     int64_t num_values_;
     int32_t codec_;
     int32_t max_def_level_;
+    TO_STRING_KV(K_(data_start_offset), K_(total_compressed_size), K_(num_values),
+                 K_(codec), K_(max_def_level));
   };
 
   struct RowGroupMeta
@@ -183,6 +186,7 @@ private:
     {}
     int64_t num_rows_;
     int64_t first_chunk_idx_;
+    TO_STRING_KV(K_(num_rows), K_(first_chunk_idx));
   };
 
   struct PageHeaderInfo

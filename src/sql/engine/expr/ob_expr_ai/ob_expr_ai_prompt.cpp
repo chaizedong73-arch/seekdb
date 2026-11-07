@@ -120,22 +120,12 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
       ObJsonString *arg_json_str = NULL;
       if (OB_FAIL(tmp_allocator.eval_arg(arg, ctx, datum))) {
       } else if (ob_is_json(arg->datum_meta_.type_)) {
-        // json array args are expanded and each element replaces its own
-        // placeholder, other json args are embedded as raw json values
+        // Each SQL argument owns one placeholder, including JSON arrays.
         ObIJsonBase *j_base = NULL;
         bool is_null = false;
         if (OB_FAIL(ObJsonExprHelper::get_json_doc(expr, ctx, tmp_allocator, i, j_base, is_null))) {
         } else if (is_null || OB_ISNULL(j_base)) {
           ret = OB_ERR_INVALID_TYPE_FOR_OP;
-        } else if (j_base->json_type() == ObJsonNodeType::J_ARRAY) {
-          ObJsonArray *arg_array = static_cast<ObJsonArray *>(j_base);
-          for (int64_t j = 0; j < arg_array->element_count() && OB_SUCC(ret); j++) {
-            ObJsonNode *elem = arg_array->get_value(j);
-            if (OB_ISNULL(elem)) {
-              ret = OB_ERR_UNEXPECTED;
-            } else if (OB_FAIL(args_array->append(elem))) {
-            }
-          }
         } else if (OB_FAIL(args_array->append(static_cast<ObJsonNode *>(j_base)))) {
         }
       } else if (ob_is_text_tc(arg->datum_meta_.type_)) {
@@ -146,6 +136,8 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
         } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, arg_str, arg_json_str))) {
         } else if (OB_FAIL(args_array->append(arg_json_str))) {
         }
+      } else if (datum->is_null()) {
+        ret = OB_ERR_INVALID_TYPE_FOR_OP;
       } else if (ob_is_string_tc(arg->datum_meta_.type_)) {
         arg_str = datum->get_string();
         if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, arg_str, arg_json_str))) {
