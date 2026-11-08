@@ -64,9 +64,6 @@ private:
 
     // check and reform parser properties to standard format
     int reform_parser_properties(const ObString &properties);
-    // reform with a process-level cache keyed by (parser_name, raw properties),
-    // so constant properties of a tokenize expr are reformed only once.
-    int reform_parser_properties_cached(const ObString &properties);
     int try_load_dictionary_for_ik();
 
   public:

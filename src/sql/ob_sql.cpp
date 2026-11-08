@@ -38,10 +38,6 @@
 #include "sql/monitor/show_trace/ob_show_trace.h"
 #include "sql/optimizer/ob_optimizer.h"
 #include "share/rc/ob_server_runtime.h"
-#include "share/ob_server_struct.h"
-#include "share/schema/ob_schema_getter_guard.h"
-#include "common/mysqlclient/ob_mysql_proxy.h"
-#include "lib/string/ob_sql_string.h"
 
 namespace oceanbase
 {
@@ -2319,10 +2315,6 @@ int ObSql::generate_physical_plan(ParseResult &parse_result,
   } else if (!is_valid) {
     ret = OB_BATCHED_MULTI_STMT_ROLLBACK;
     LOG_WARN("batched multi_stmt needs rollback", K(ret));
-  } else if (!is_begin_commit_stmt
-             && stmt::T_SELECT == basic_stmt->get_stmt_type()
-             && OB_FAIL(check_ai_column_strict_read(*basic_stmt, sql_ctx))) {
-    LOG_WARN("fail to check ai column strict read", K(ret));
   } else if (basic_stmt->is_dml_stmt()
              || basic_stmt->is_explain_stmt()
             ) {
@@ -2345,99 +2337,6 @@ int ObSql::generate_physical_plan(ParseResult &parse_result,
       }
     }
   }
-  return ret;
-}
-
-int ObSql::check_ai_column_strict_read(ObStmt &basic_stmt, ObSqlCtx &sql_ctx)
-{
-  static __thread bool in_ai_strict_check = false;
-  if (in_ai_strict_check) {
-    // the internal check SQL below reaches this function again, skip it to avoid
-    // infinite recursion when the global variable ai_column_strict_read is enabled
-    return OB_SUCCESS;
-  }
-  int ret = OB_SUCCESS;
-  ObSQLSessionInfo *session = sql_ctx.session_info_;
-  ObDMLStmt *dml_stmt = dynamic_cast<ObDMLStmt *>(&basic_stmt);
-  bool strict_read = false;
-  if (OB_ISNULL(session) || OB_ISNULL(dml_stmt)) {
-    // nothing to check
-  } else if (OB_FAIL(session->get_sys_variable(share::SYS_VAR_AI_COLUMN_STRICT_READ, strict_read))) {
-    LOG_WARN("fail to get ai_column_strict_read variable", K(ret));
-  } else if (!strict_read) {
-    // strict read is disabled
-  } else if (OB_ISNULL(GCTX.sql_proxy_)) {
-    // sql proxy is not ready
-  } else {
-    in_ai_strict_check = true;
-    ObArray<ObColumnRefRawExpr *> column_exprs;
-    ObSchemaGetterGuard schema_guard;
-    bool schema_ready = false;
-    if (OB_FAIL(dml_stmt->get_column_exprs(column_exprs))) {
-      LOG_WARN("fail to get column exprs", K(ret));
-    } else if (OB_ISNULL(GCTX.schema_service_)) {
-      // schema service is not ready, skip the check
-    } else if (OB_FAIL(GCTX.schema_service_->get_runtime_schema_guard(schema_guard))) {
-      LOG_WARN("fail to get schema guard for ai column strict read", K(ret));
-    } else {
-      schema_ready = true;
-    }
-    for (int64_t i = 0; OB_SUCC(ret) && schema_ready && i < column_exprs.count(); ++i) {
-      ObColumnRefRawExpr *col_expr = column_exprs.at(i);
-      const ObTableSchema *table_schema = NULL;
-      const ObColumnSchemaV2 *column_schema = NULL;
-      if (OB_ISNULL(col_expr)) {
-        // skip invalid column expr
-      } else if (OB_FAIL(schema_guard.get_table_schema(col_expr->get_table_id(), table_schema))) {
-        LOG_WARN("fail to get table schema", K(ret), K(col_expr->get_table_id()));
-      } else if (OB_ISNULL(table_schema) || !table_schema->is_user_table()) {
-        // table not found or not a user table
-      } else if (OB_ISNULL(column_schema = table_schema->get_column_schema(col_expr->get_column_id()))
-                 || !column_schema->is_ai_column()) {
-        // not an ai column
-      } else {
-        const ObString col_name = column_schema->get_column_name_str();
-        const ObString tbl_name = table_schema->get_table_name_str();
-        const ObDatabaseSchema *db_schema = NULL;
-        if (OB_FAIL(schema_guard.get_database_schema(table_schema->get_database_id(), db_schema))) {
-          LOG_WARN("fail to get database schema", K(ret), K(col_expr->get_table_id()));
-        } else if (OB_ISNULL(db_schema)) {
-          ret = OB_ERR_UNEXPECTED;
-          LOG_WARN("database schema is null", K(ret), K(col_expr->get_table_id()));
-        } else {
-          const ObString db_name = db_schema->get_database_name_str();
-          common::ObSqlString sql;
-          if (OB_FAIL(sql.append_fmt("SELECT 1 FROM `%.*s`.`%.*s` WHERE `%.*s` IS NULL LIMIT 1",
-                                     db_name.length(), db_name.ptr(),
-                                     tbl_name.length(), tbl_name.ptr(),
-                                     col_name.length(), col_name.ptr()))) {
-            LOG_WARN("fail to build ai column strict read check sql", K(ret));
-          } else {
-            SMART_VAR(ObMySQLProxy::MySQLResult, res) {
-              if (OB_FAIL(GCTX.sql_proxy_->read(res, sql.ptr()))) {
-                LOG_WARN("fail to check ai column value state", K(ret), K(sql));
-              } else if (OB_ISNULL(res.mysql_result())) {
-                ret = OB_ERR_UNEXPECTED;
-                LOG_WARN("mysql result is null", K(ret));
-              } else {
-                sqlclient::ObMySQLResult *result = res.mysql_result();
-                int tmp_ret = result->next();
-                if (OB_SUCCESS == tmp_ret) {
-                  // the AI column has rows whose value is not computed yet
-                  ret = OB_ERR_AI_COLUMN_NOT_READY;
-                  LOG_USER_ERROR(OB_ERR_AI_COLUMN_NOT_READY, col_name.length(), col_name.ptr());
-                } else if (OB_ITER_END != tmp_ret) {
-                  ret = tmp_ret;
-                  LOG_WARN("fail to iterate ai column check result", K(ret));
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  in_ai_strict_check = false;
   return ret;
 }
 

@@ -19,6 +19,7 @@
 #include "share/ob_ai_column_service.h"
 
 #include "lib/string/ob_sql_string.h"
+#include "common/mysqlclient/ob_mysql_proxy.h"
 #include "share/ob_server_struct.h"
 #include "share/schema/ob_ai_column_meta.h"
 #include "share/schema/ob_schema_getter_guard.h"

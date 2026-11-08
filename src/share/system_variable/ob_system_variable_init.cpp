@@ -74,7 +74,6 @@ const ObSysVarClassType ESSENTIAL_SYS_VARS[] = {
   SYS_VAR_CARDINALITY_ESTIMATION_MODEL,        // cardinality_estimation_model
   SYS_VAR_DEFAULT_COLLATION_FOR_UTF8MB4,        // default_collation_for_utf8mb4
   SYS_VAR__PUSH_JOIN_PREDICATE,        // _push_join_predicate
-  SYS_VAR_ENABLE_FILE_SQL,        // enable_file_sql
 };
 
 const int64_t ESSENTIAL_SYS_VARS_COUNT = sizeof(ESSENTIAL_SYS_VARS) / sizeof(ESSENTIAL_SYS_VARS[0]);

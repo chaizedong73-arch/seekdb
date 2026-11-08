@@ -16,6 +16,8 @@
 
 #define USING_LOG_PREFIX SQL_RESV
 #include "config_bridge.h"
+#include "sql/engine/expr/ob_expr_file_table_func.h"
+#include "sql/engine/file_scan/file_table_reader.h"
 #include "ob_dml_resolver.h"
 #include "sql/resolver/dml/ob_view_table_resolver.h"
 #include "sql/optimizer/ob_optimizer_util.h"
@@ -41,8 +43,6 @@
 #include "sql/resolver/dcl/ob_dcl_resolver.h"
 #include "sql/resolver/ddl/ob_ddl_resolver.h"
 #include "sql/hybrid_search/ob_hybrid_search_executor.h"
-#include "sql/engine/expr/ob_expr_file_table_func.h"
-#include "sql/engine/file_scan/file_table_reader.h"
 
 namespace oceanbase
 {
@@ -1908,11 +1908,7 @@ int ObDMLResolver::resolve_basic_column_item(const TableItem &table_item,
       bool is_lob_column = is_lob_storage(col_schema->get_data_type());
       col_expr->set_lob_column(is_lob_column);
       column_item.expr_ = col_expr;
-      if (col_schema->is_ai_column()) {
-        // The default value of an AI column is its serialized definition, never
-        // an insertable value. Unspecified AI columns are filled with NULL.
-        column_item.set_default_value(ObObj());
-      } else if (session_info_->get_ddl_info().is_ddl()) {
+      if (session_info_->get_ddl_info().is_ddl()) {
         column_item.set_default_value(col_schema->get_orig_default_value());
       } else {
         column_item.set_default_value(col_schema->get_cur_default_value());
@@ -7483,9 +7479,6 @@ int ObDMLResolver::resolve_function_table_column_item(const TableItem &table_ite
   if (OB_SUCC(ret)) {
     if (table_item.function_table_expr_->get_result_type().is_ext()) {
       ret = resolve_function_table_column_item_udf(table_item, col_items);
-    } else if (FileTableFuncExpr::is_file_table_func_type(
-                   table_item.function_table_expr_->get_expr_type())) {
-      ret = resolve_function_table_column_item_file(table_item, col_items);
     } else {
       ret = resolve_function_table_column_item_sys_func(table_item, col_items);
     }
