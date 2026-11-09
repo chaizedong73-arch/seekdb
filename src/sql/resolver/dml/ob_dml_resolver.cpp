@@ -7479,6 +7479,9 @@ int ObDMLResolver::resolve_function_table_column_item(const TableItem &table_ite
   if (OB_SUCC(ret)) {
     if (table_item.function_table_expr_->get_result_type().is_ext()) {
       ret = resolve_function_table_column_item_udf(table_item, col_items);
+    } else if (FileTableFuncExpr::is_file_table_func_type(
+                   table_item.function_table_expr_->get_expr_type())) {
+      ret = resolve_function_table_column_item_file(table_item, col_items);
     } else {
       ret = resolve_function_table_column_item_sys_func(table_item, col_items);
     }
