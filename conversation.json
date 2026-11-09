@@ -1,0 +1,105 @@
+{
+  "meta": {
+    "rule": "agent-learning-evidence-v3-unbounded",
+    "project": "2026 OceanBase 加赛 · MiniVectorDB",
+    "source": "ZCode 真实会话节选（2026-11-09）",
+    "synthetic": false,
+    "note": "学生原话、Agent 说明、工具实际输出分字段标注；预测标为预测，未执行内容标为计划；无编造。"
+  },
+  "context": {
+    "task": "实现 MiniVectorDB：一套支持基础 SQL、向量检索、持久化存储、事务与崩溃恢复的轻量数据库。本题加赛满分 80 分，初赛已得分不受影响。",
+    "environment": "Windows + WSL Ubuntu 26.04；C++20；Docker 29.1.3；本地测试。",
+    "material_note": "本文件同时放在 agent/conversation.json 与仓库根 conversation.json，内容一致。"
+  },
+  "student_profile": {
+    "self_report": "此前不会读 SQL；本次从 WHERE/ORDER BY/LIMIT 开始学。"
+  },
+  "conversations": [
+    {
+      "id": "c1",
+      "role": "student",
+      "content": "sql不会读怎么办",
+      "source": "ZCode 2026-11-09"
+    },
+    {
+      "id": "c2",
+      "role": "agent",
+      "content": "没关系，不用会写 SQL；会读 WHERE、ORDER BY、LIMIT 就够了。FROM 取行，WHERE 先筛行，ORDER BY 排序，LIMIT 只留前 N 行。WHERE 在 LIMIT 之前生效，LIMIT 的名额只在满足 WHERE 的行里分。",
+      "note": "教学上下文，不作为学生证据"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "e1",
+      "title": "过滤 TopK：先过滤还是先截断",
+      "student_evidence": "A先截断，然后再过滤，就变得更少了，被差值更小，但不满足条件的行占了位置",
+      "student_supporting": [
+        "1.2和4，d分别是0和1\n2.2和4\n3.一行， (2,2,'[0,0]')\n4.因为LIMIT 2;导致后面被截断了，“k的名额被谁占掉了”没听懂",
+        "两行，因为4进来了",
+        "1行，还是之前的那个\n2.不变",
+        "3.被id=6, grp=1, vec=[0.5,0]抢了"
+      ],
+      "student_misconception": "因为差值为1，比0.5大，被过滤了",
+      "result_evidence": "id\tgrp\td\n1\t1\t0.000000\n2\t2\t0.000000\n\nid\tgrp\td\n2\t2\t0.000000\n4\t2\t1.000000",
+      "result_supporting": [
+        "id\tgrp\td\n1\t1\t0.000000\n2\t2\t0.000000\n4\t2\t1.000000",
+        "id\tgrp\td\n1\t1\t0.000000\n2\t2\t0.000000\n6\t1\t0.500000\n\nid\tgrp\td\n2\t2\t0.000000\n4\t2\t1.000000"
+      ],
+      "agent_note": "LIMIT 2 是 2 个名额。A 先截断，grp=1 的 id1 占了名额；B 先 WHERE 再取。反例 id6（grp=1，d=0.5）占第 3 个名额，id4（grp=2，d=1）被 LIMIT 3 截断，过滤发生在截断之后，不能补位。学生最初说“被过滤了”，经辨析后确认是“被 LIMIT 截掉”。",
+      "dimension_hint": "独立验证与质疑 / 实验与反馈迭代"
+    },
+    {
+      "id": "e2",
+      "title": "堆 TopK vs 全排序",
+      "student_initial_hypothesis": "1.因为全排序是时间复杂度是n！堆排序是n\n2变大\n3.如果要求前十我会选择堆",
+      "student_evidence": "1.全排序复杂度是nlogn，堆是nlogk\n2.k变大，堆的优势变小，因为堆的时间复杂度的权重变大了",
+      "student_supporting": [
+        "我怎么感觉堆代码更简单呢",
+        "那全排序吧，如果代码简单的话，你把两个代码给我看一下，是不是我想象中的",
+        "你用了封装函数啊，那确实简单，要是手搓的话我觉得还是堆更简单，因为手搓排序还是挺麻烦的",
+        "1.都选全排，除非超时\n2.选堆",
+        "1.堆\n2.如实解释，写的快；选堆就是看性能"
+      ],
+      "result_evidence": "query: 1000 top-10 queries -> 0.835 s, 12000 output lines\nquery peak RSS: 12.6 MiB",
+      "result_supporting": [
+        "query: 1000 top-10 queries -> 3.783 s, 12000 output lines\nquery peak RSS: 20.1 MiB",
+        "heap time 0.254 rss_mb 13.1 lines 55200 rc 0",
+        "no-heap time 0.509 rss_mb 20.0 lines 55200 rc 0"
+      ],
+      "agent_note": "全排序 O(n log n)，堆 O(n log K)；K=10 时 log 比约 4，K=1000 时约 1.3，实测 4.5 倍 / 2.0 倍。代码用 std::sort 与 std::push_heap；若完全手搓，K 小时最简的是 K 格线性扫描，K 大才需要堆。学生在代码对比后把竞赛选择从“全排优先”改为“堆，保性能”。",
+      "dimension_hint": "实验与反馈迭代 / 技术理解与迁移"
+    }
+  ],
+  "implementation": [
+    {
+      "id": "i1",
+      "title": "无题包时把协议层隔离",
+      "student_prompt": "有题包这种东西吗，所有信息我都给你了",
+      "agent_action": "承认没有题包，改为按题面实现；把 READY、结果格式、错误码、exact/ann 切换做成可配置的协议层。",
+      "result": "协议层已隔离（--ready/--format/--mode 可配置），核心存储/事务/恢复不依赖协议；本地 smoke/crash 通过。",
+      "dimension_hint": "问题理解与自主拆解"
+    },
+    {
+      "id": "i2",
+      "title": "提交仓库与 Docker",
+      "student_prompt_repo": "chaizedong73-arch/seekdb，这个仓库",
+      "student_prompt_docker": "没有docker吗？你先检查一下，如果真的没有就装一个",
+      "agent_action": "检查确认 Windows/WSL 均无 Docker；在 WSL 安装 docker.io 29.1.3，用 daocloud 镜像拉取基础镜像，构建并运行容器；推送公开 fork。",
+      "result": "已推送公开 fork 的 2026-competition-round2；镜像构建成功；容器 smoke 与 /data 卷持久化通过。",
+      "dimension_hint": "问题理解与自主拆解 / 取舍与反思"
+    }
+  ],
+  "retrospective": {
+    "author": "agent",
+    "summary": "学生从不会读 SQL 开始，通过“预测→实测→解释→反例→复测”完成了过滤 TopK 的修正链；在堆/排序上先给出 n!/n 的复杂度，经 K=10 与 K=1000 实测修正为 O(n log n)/O(n log K)，并最终在“代码简单”与“性能”之间选择堆。"
+  },
+  "limitations": {
+    "author": "agent",
+    "items": [
+      "题包/驱动未提供：READY、TSV、Query OK、错误文案是按题面的约定，协议层可配置。",
+      "ANN 物理索引未实现：ann 走精确扫描，召回 1.0，但大数据查询不如专用索引。",
+      "PK 映射常驻内存；更新追加版本、无 compaction；DDL 在显式事务内返回 1105。",
+      "本地性能是 WSL 的 /usr/bin/time 与自建负载，不是平台 cgroup 口径。"
+    ]
+  }
+}
