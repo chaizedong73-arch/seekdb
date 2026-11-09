@@ -1,5 +1,6 @@
 #include "engine.h"
 
+#include <cerrno>
 #include <condition_variable>
 #include <csignal>
 #include <cstdlib>
@@ -7,9 +8,12 @@
 #include <deque>
 #include <iostream>
 #include <mutex>
+#include <poll.h>
+#include <signal.h>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 using namespace mvdb;
@@ -127,6 +131,8 @@ class StatementReader {
   }
 
   void finish(std::vector<std::string>& out) { emit(out); }
+
+  std::string pending_trimmed() const { return trim_copy(buf_); }
 
  private:
   enum class S { Normal, Single, Double, Backtick, LineComment, BlockComment };
@@ -286,8 +292,12 @@ int main(int argc, char** argv) {
     cache_mb = static_cast<size_t>(std::strtoull(e, nullptr, 10));
   }
 
-  std::signal(SIGINT, on_signal);
-  std::signal(SIGTERM, on_signal);
+  struct sigaction sa {};
+  sa.sa_handler = on_signal;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;  // no SA_RESTART: interrupt a blocking getline
+  sigaction(SIGINT, &sa, nullptr);
+  sigaction(SIGTERM, &sa, nullptr);
 
   Output out;
   try {
@@ -303,15 +313,24 @@ int main(int argc, char** argv) {
 
     StatementReader reader;
     std::vector<std::string> stmts;
-    std::string line;
-    while (!g_stop && std::getline(std::cin, line)) {
-      std::string t = trim_copy(line);
-      std::string u = upper_copy(t);
-      if (t == "\\q" || u == "EXIT" || u == "QUIT") {
-        g_stop = 1;
+    struct pollfd pfd {};
+    pfd.fd = 0;
+    pfd.events = POLLIN;
+    while (!g_stop) {
+      int pr = ::poll(&pfd, 1, 200);
+      if (pr < 0) {
+        if (errno == EINTR) continue;
         break;
       }
-      reader.feed(line + "\n", stmts);
+      if (pr == 0) continue;
+      char buf[65536];
+      ssize_t n = ::read(0, buf, sizeof(buf));
+      if (n < 0) {
+        if (errno == EINTR) continue;
+        break;
+      }
+      if (n == 0) break;
+      reader.feed(std::string(buf, static_cast<size_t>(n)), stmts);
       for (auto& s : stmts) {
         if (is_quit_statement(s)) {
           g_stop = 1;
@@ -320,6 +339,9 @@ int main(int argc, char** argv) {
         execute_one(db, s, format, out);
       }
       stmts.clear();
+      if (!g_stop && is_quit_statement(reader.pending_trimmed())) {
+        g_stop = 1;
+      }
     }
 
     if (!g_stop) {
