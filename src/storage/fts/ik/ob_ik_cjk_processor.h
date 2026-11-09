@@ -18,6 +18,7 @@
 #define _OCEANBASE_STORAGE_FTS_IK_OB_IK_CJK_PROCESSOR_H_
 
 #include "lib/allocator/ob_allocator.h"
+#include "lib/container/ob_array.h"
 #include "storage/fts/dict/ob_ft_dict.h"
 #include "storage/fts/ik/ob_ik_processor.h"
 
@@ -29,9 +30,14 @@ class ObFTDictHub;
 class ObIKCJKProcessor : public ObIIKProcessor
 {
 public:
+  // The set of still-alive trie paths is bounded by the length of the longest
+  // dictionary word, so a small inline array avoids one list-node allocation
+  // per character on the tokenize hot path.
+  static const int64_t MAX_ACTIVE_HITS = 16;
   ObIKCJKProcessor(const ObIFTDict &dict_main, ObIAllocator &alloc)
-      : hits_(alloc), dict_main_(dict_main), cjk_start_(-1), cjk_end_(-1)
+      : hits_(), dict_main_(dict_main), cjk_start_(-1), cjk_end_(-1)
   {
+    UNUSED(alloc);
   }
   ~ObIKCJKProcessor() override { hits_.reset(); }
 
@@ -42,7 +48,7 @@ public:
                  const ObFTCharUtil::CharType type) override;
 
 private:
-  ObList<ObDATrieHit, ObIAllocator> hits_;
+  common::ObSEArray<ObDATrieHit, MAX_ACTIVE_HITS> hits_;
   const ObIFTDict &dict_main_;
   int64_t cjk_start_;
   int64_t cjk_end_;
