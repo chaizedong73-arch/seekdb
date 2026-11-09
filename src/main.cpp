@@ -260,6 +260,7 @@ int main(int argc, char** argv) {
   std::string mode = "exact";
   std::string format = "tsv";
   size_t cache_mb = 64;
+  bool no_heap = false;
 
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
@@ -275,9 +276,11 @@ int main(int argc, char** argv) {
     else if (a == "--mode") mode = next("--mode");
     else if (a == "--format") format = next("--format");
     else if (a == "--cache-mb") cache_mb = static_cast<size_t>(std::stoull(next("--cache-mb")));
+    else if (a == "--no-heap") no_heap = true;
     else if (a == "--help" || a == "-h") {
       std::cerr << "usage: minivectordb [--data DIR] [--ready TEXT] "
-                   "[--mode exact|ann] [--format tsv|mysql] [--cache-mb N]\n";
+                   "[--mode exact|ann] [--format tsv|mysql] [--cache-mb N] "
+                   "[--no-heap]\n";
       return 0;
     } else {
       std::cerr << "unknown argument: " << a << "\n";
@@ -291,6 +294,9 @@ int main(int argc, char** argv) {
   if (const char* e = std::getenv("MVDB_CACHE_MB")) {
     cache_mb = static_cast<size_t>(std::strtoull(e, nullptr, 10));
   }
+  if (const char* e = std::getenv("MVDB_NO_HEAP")) {
+    no_heap = (std::string(e) != "0");
+  }
 
   struct sigaction sa {};
   sa.sa_handler = on_signal;
@@ -302,6 +308,7 @@ int main(int argc, char** argv) {
   Output out;
   try {
     Database db(data_dir, cache_mb);
+    if (no_heap) db.set_heap_enabled(false);
     if (mode == "ann") {
       SetStmt s;
       s.name = "vector_mode";

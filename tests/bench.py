@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Local 10k x 128 write/query benchmark for MiniVectorDB."""
+"""Local 10k x 128 write/query benchmark for MiniVectorDB.
+
+Usage:
+  python3 tests/bench.py             # heap TopK (default)
+  python3 tests/bench.py --no-heap   # collect all matches + full sort
+"""
 import os
 import shutil
 import subprocess
@@ -9,6 +14,8 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN = os.environ.get("BIN", os.path.join(ROOT, "build", "minivectordb"))
+NO_HEAP = "--no-heap" in sys.argv[1:]
+TIME_BIN = "/usr/bin/time" if os.path.exists("/usr/bin/time") else None
 
 DIM = 128
 N = 10000
@@ -66,28 +73,45 @@ def main():
             )
         write_s = time.perf_counter() - t0
 
+        cmd = [BIN, "--data", db]
+        if NO_HEAP:
+            cmd.append("--no-heap")
+        if TIME_BIN:
+            cmd = [TIME_BIN, "-v"] + cmd
         p = subprocess.Popen(
-            [BIN, "--data", db],
+            cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
         ready = p.stdout.readline()
         with open(query_sql, "rb") as f:
             qbytes = f.read()
         t0 = time.perf_counter()
-        out, _ = p.communicate(input=qbytes)
+        out, err = p.communicate(input=qbytes)
         query_s = time.perf_counter() - t0
         if p.returncode != 0:
             print(f"query process failed: {p.returncode}", file=sys.stderr)
+            print(err.decode(errors="replace")[-2000:], file=sys.stderr)
             return 1
 
+        rss_mb = None
+        for line in err.decode(errors="replace").splitlines():
+            if "Maximum resident set size" in line:
+                try:
+                    rss_mb = int(line.split(":")[-1].strip()) / 1024.0
+                except ValueError:
+                    pass
+
+        print(f"mode: {'no-heap (collect+sort)' if NO_HEAP else 'heap top-k'}")
         print(f"ready: {ready.decode(errors='replace').strip()}")
         print(f"write: {N} rows x {DIM} dims, {N // BATCH} batches -> {write_s:.3f} s")
         print(
             f"query: {QUERIES} top-{K} queries -> {query_s:.3f} s, "
             f"{out.count(chr(10).encode())} output lines"
         )
+        if rss_mb is not None:
+            print(f"query peak RSS: {rss_mb:.1f} MiB")
         return 0
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

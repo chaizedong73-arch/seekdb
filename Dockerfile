@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 FROM ubuntu:24.04 AS build
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \

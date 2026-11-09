@@ -337,6 +337,8 @@ class Database {
     tables_.clear();
   }
 
+  void set_heap_enabled(bool v) { heap_enabled_ = v; }
+
   Result execute(const Statement& st) {
     if (auto* s = std::get_if<SelectStmt>(&st)) return exec_select(*s);
     if (auto* s = std::get_if<InsertStmt>(&st)) {
@@ -370,6 +372,7 @@ class Database {
   std::unordered_set<uint32_t> begun_;
   std::vector<uint32_t> touched_;
   std::string vector_mode_ = "exact";
+  bool heap_enabled_ = true;
 
   static std::string ensure_dir(std::string d) {
     std::filesystem::create_directories(d);
@@ -870,7 +873,8 @@ class Database {
     };
 
     const bool empty_limit = st.has_limit && st.limit == 0;
-    bool use_heap = st.has_limit && st.limit > 0 && !specs.empty();
+    bool use_heap =
+        heap_enabled_ && st.has_limit && st.limit > 0 && !specs.empty();
     size_t keep = 0;
     if (use_heap) {
       keep = static_cast<size_t>(st.offset) + static_cast<size_t>(st.limit);

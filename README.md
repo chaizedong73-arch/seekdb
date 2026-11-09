@@ -55,6 +55,7 @@ docker run --rm -i -v minivectordb-data:/data --cpus=2 --memory=2g minivectordb:
 | `--mode exact\|ann` | `MVDB_MODE` | `exact` | 向量检索模式；当前 ann 走精确扫描 |
 | `--format tsv\|mysql` | `MVDB_FORMAT` | `tsv` | 结果集格式 |
 | `--cache-mb N` | `MVDB_CACHE_MB` | `64` | 行缓存上限；超过则退化为按需读盘 |
+| `--no-heap` | `MVDB_NO_HEAP` | off | 实验开关：关闭堆 TopK，改为收集全部匹配后排序（A/B 用） |
 
 ## 3. 协议
 
