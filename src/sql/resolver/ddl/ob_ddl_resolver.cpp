@@ -8035,6 +8035,21 @@ int ObDDLResolver::resolve_hints(const ParseNode *node, ObDDLStmt &stmt, const O
       stmt.set_parallelism(parallelism);
     }
   }
+  // Fulltext index build is dominated by per-document segmentation, which is
+  // embarrassingly parallel: tokenize every document, then write the inverted
+  // rows. Without an explicit hint or session knob the resolver used to fall
+  // back to a single worker, leaving the machine idle during the scan phase.
+  // Default such builds to a moderate degree derived from the host CPU count.
+  if (OB_SUCC(ret) && !stmt.get_has_parallel_hint() && stmt.get_parallelism() <= 1
+      && stmt::T_CREATE_INDEX == stmt.get_cmd_type()) {
+    const ObCreateIndexArg &ci_arg = static_cast<ObCreateIndexStmt &>(stmt).get_create_index_arg();
+    if (share::schema::is_fts_index(ci_arg.index_type_)) {
+      const int64_t cpu_cnt = common::get_cpu_num();
+      const int64_t dop = std::min<int64_t>(std::max<int64_t>(cpu_cnt / 2, 2), 8);
+      stmt.set_parallelism(dop);
+      LOG_INFO("default parallelism for fulltext index build", K(cpu_cnt), K(dop));
+    }
+  }
   return ret;
 }
 
