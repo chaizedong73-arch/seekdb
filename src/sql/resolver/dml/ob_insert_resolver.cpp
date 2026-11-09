@@ -488,15 +488,9 @@ int ObInsertResolver::resolve_values(const ParseNode &value_node,
     // value list
     if (OB_FAIL(resolve_insert_values(&value_node,
                                       insert_stmt->get_insert_table_info()))) {
-    } else if (OB_FAIL(check_ai_column_direct_assign(
-                  insert_stmt->get_insert_table_info().values_desc_))) {
-      LOG_WARN("fail to check ai column direct assign", K(ret));
     }
   } else if (T_ASSIGN_LIST == value_node.type_) {
     if (OB_FAIL(resolve_insert_assign(value_node))) {
-    } else if (OB_FAIL(check_ai_column_direct_assign(
-                  insert_stmt->get_insert_table_info().values_desc_))) {
-      LOG_WARN("fail to check ai column direct assign", K(ret));
     }
   } else if (OB_ISNULL(select_buffer = allocator_->alloc(sizeof(ObSelectResolver)))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
@@ -834,12 +828,6 @@ int ObInsertResolver::check_insert_select_field(ObInsertStmt &insert_stmt,
       if (ref_stmt->get_select_item_size() != select_stmt.get_select_item_size()) {
         ret = OB_ERR_UNEXPECTED;
       }
-    }
-  }
-  if (OB_SUCC(ret)) {
-    // business SQL must not assign values to AI columns directly
-    if (OB_FAIL(check_ai_column_direct_assign(values_desc))) {
-      LOG_WARN("fail to check ai column direct assign", K(ret));
     }
   }
   for (int64_t i = 0; OB_SUCC(ret) && i < values_desc.count(); ++i) {
