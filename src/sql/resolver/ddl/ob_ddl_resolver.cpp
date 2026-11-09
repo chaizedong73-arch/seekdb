@@ -8040,12 +8040,23 @@ int ObDDLResolver::resolve_hints(const ParseNode *node, ObDDLStmt &stmt, const O
   // rows. Without an explicit hint or session knob the resolver used to fall
   // back to a single worker, leaving the machine idle during the scan phase.
   // Default such builds to a moderate degree derived from the host CPU count.
-  if (OB_SUCC(ret) && !stmt.get_has_parallel_hint() && stmt.get_parallelism() <= 1
-      && stmt::T_CREATE_INDEX == stmt.get_cmd_type()) {
-    const ObCreateIndexArg &ci_arg = static_cast<ObCreateIndexStmt &>(stmt).get_create_index_arg();
-    if (share::schema::is_fts_index(ci_arg.index_type_)) {
+  if (OB_SUCC(ret) && !stmt.get_has_parallel_hint() && stmt.get_parallelism() <= 1) {
+    bool has_fts_index = false;
+    if (stmt::T_CREATE_INDEX == stmt.get_cmd_type()) {
+      const ObCreateIndexArg &ci_arg = static_cast<ObCreateIndexStmt &>(stmt).get_create_index_arg();
+      has_fts_index = share::schema::is_fts_index(ci_arg.index_type_);
+    } else if (stmt::T_ALTER_TABLE == stmt.get_cmd_type()) {
+      const common::ObSArray<obcall::ObCreateIndexArg *> &idx_args =
+          static_cast<ObAlterTableStmt &>(stmt).get_index_arg_list();
+      for (int64_t i = 0; !has_fts_index && i < idx_args.count(); ++i) {
+        if (OB_NOT_NULL(idx_args.at(i))) {
+          has_fts_index = share::schema::is_fts_index(idx_args.at(i)->index_type_);
+        }
+      }
+    }
+    if (has_fts_index) {
       const int64_t cpu_cnt = common::get_cpu_num();
-      const int64_t dop = std::min<int64_t>(std::max<int64_t>(cpu_cnt / 2, 2), 8);
+      const int64_t dop = std::min<int64_t>(std::max<int64_t>(cpu_cnt, 2), 16);
       stmt.set_parallelism(dop);
       LOG_INFO("default parallelism for fulltext index build", K(cpu_cnt), K(dop));
     }
