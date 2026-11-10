@@ -1,252 +1,101 @@
 #include "engine.h"
+#include "json.hpp"
 
-#include <cerrno>
-#include <condition_variable>
-#include <csignal>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include <deque>
 #include <iostream>
-#include <mutex>
-#include <poll.h>
-#include <signal.h>
-#include <sstream>
 #include <string>
-#include <thread>
-#include <unistd.h>
-#include <vector>
 
 using namespace mvdb;
+using nlohmann::json;
 
 namespace {
 
-volatile std::sig_atomic_t g_stop = 0;
-
-void on_signal(int) { g_stop = 1; }
-
-// Serializes all stdout writes on a dedicated thread. The SQL loop can keep
-// consuming stdin even if the test driver is slow to drain stdout, which avoids
-// a classic pipe deadlock when the driver writes a whole batch before reading.
-class Output {
- public:
-  Output() { thread_ = std::thread([this] { run(); }); }
-  ~Output() { finish(); }
-
-  void enqueue(std::string s) {
-    {
-      std::lock_guard<std::mutex> lk(mu_);
-      queue_.push_back(std::move(s));
-    }
-    cv_.notify_one();
-  }
-
-  void finish() {
-    {
-      std::lock_guard<std::mutex> lk(mu_);
-      done_ = true;
-    }
-    cv_.notify_one();
-    if (thread_.joinable()) thread_.join();
-  }
-
- private:
-  std::mutex mu_;
-  std::condition_variable cv_;
-  std::deque<std::string> queue_;
-  bool done_ = false;
-  std::thread thread_;
-
-  void run() {
-    for (;;) {
-      std::string s;
-      {
-        std::unique_lock<std::mutex> lk(mu_);
-        cv_.wait(lk, [this] { return done_ || !queue_.empty(); });
-        if (queue_.empty()) {
-          if (done_) return;
-          continue;
-        }
-        s = std::move(queue_.front());
-        queue_.pop_front();
+std::string semantic_code(const DbError& e) {
+  switch (e.code) {
+    case 1062: return "duplicate_key";
+    case 1050: return "table_exists";
+    case 1146: return "table_not_found";
+    case 1054: return "column_not_found";
+    case 1060: return "duplicate_column";
+    case 1110: return "column_specified_twice";
+    case 1136: return "column_count_mismatch";
+    case 1406: return "value_too_long";
+    case 1264: return "integer_out_of_range";
+    case 1366:
+      if (e.message.find("dimension") != std::string::npos) {
+        return "dimension_mismatch";
       }
-      std::cout.write(s.data(), static_cast<std::streamsize>(s.size()));
-      std::cout.flush();
-    }
-  }
-};
-
-// Streaming statement splitter: emits a statement whenever a top-level ';' is
-// seen. Semicolons inside strings, quoted identifiers and comments do not
-// split.
-class StatementReader {
- public:
-  void feed(const std::string& chunk, std::vector<std::string>& out) {
-    for (size_t i = 0; i < chunk.size(); ++i) {
-      char c = chunk[i];
-      char n = (i + 1 < chunk.size()) ? chunk[i + 1] : '\0';
-      switch (st_) {
-        case S::Normal:
-          if (c == '\'') { st_ = S::Single; buf_.push_back(c); }
-          else if (c == '"') { st_ = S::Double; buf_.push_back(c); }
-          else if (c == '`') { st_ = S::Backtick; buf_.push_back(c); }
-          else if (c == '-' && n == '-') { st_ = S::LineComment; buf_.push_back(c); buf_.push_back(n); ++i; }
-          else if (c == '#') { st_ = S::LineComment; buf_.push_back(c); }
-          else if (c == '/' && n == '*') { st_ = S::BlockComment; buf_.push_back(c); buf_.push_back(n); ++i; }
-          else if (c == ';') { emit(out); }
-          else { buf_.push_back(c); }
-          break;
-        case S::Single:
-          buf_.push_back(c);
-          if (c == '\\' && i + 1 < chunk.size()) { buf_.push_back(chunk[++i]); }
-          else if (c == '\'') {
-            if (n == '\'') { buf_.push_back(n); ++i; }
-            else st_ = S::Normal;
-          }
-          break;
-        case S::Double:
-          buf_.push_back(c);
-          if (c == '\\' && i + 1 < chunk.size()) { buf_.push_back(chunk[++i]); }
-          else if (c == '"') {
-            if (n == '"') { buf_.push_back(n); ++i; }
-            else st_ = S::Normal;
-          }
-          break;
-        case S::Backtick:
-          buf_.push_back(c);
-          if (c == '`') {
-            if (n == '`') { buf_.push_back(n); ++i; }
-            else st_ = S::Normal;
-          }
-          break;
-        case S::LineComment:
-          buf_.push_back(c);
-          if (c == '\n') st_ = S::Normal;
-          break;
-        case S::BlockComment:
-          buf_.push_back(c);
-          if (c == '*' && n == '/') { buf_.push_back(n); ++i; st_ = S::Normal; }
-          break;
+      if (e.message.find("finite") != std::string::npos ||
+          e.message.find("vector") != std::string::npos ||
+          e.message.find("Vector") != std::string::npos) {
+        return "invalid_vector";
       }
-    }
+      return "invalid_value";
+    case 1568: return "transaction_conflict";
+    case 1061: return "duplicate_index";
+    case 1364: return "missing_value";
+    case 1064:
+      if (e.message.rfind("Unsupported", 0) == 0) return "unsupported_sql";
+      return "syntax_error";
+    default:
+      return "error_" + std::to_string(e.code);
   }
-
-  void finish(std::vector<std::string>& out) { emit(out); }
-
-  std::string pending_trimmed() const { return trim_copy(buf_); }
-
- private:
-  enum class S { Normal, Single, Double, Backtick, LineComment, BlockComment };
-  S st_ = S::Normal;
-  std::string buf_;
-
-  void emit(std::vector<std::string>& out) {
-    std::string t = trim_copy(buf_);
-    if (!t.empty()) out.push_back(std::move(t));
-    buf_.clear();
-  }
-};
-
-bool is_quit_statement(const std::string& s) {
-  std::string t = trim_copy(s);
-  if (t == "\\q") return true;
-  std::string u = upper_copy(t);
-  return u == "EXIT" || u == "QUIT" || u == "\\QUIT";
 }
 
-std::string escape_tsv(const std::string& s) {
-  std::string o;
-  o.reserve(s.size());
-  for (char c : s) {
-    switch (c) {
-      case '\\': o += "\\\\"; break;
-      case '\t': o += "\\t"; break;
-      case '\n': o += "\\n"; break;
-      case '\r': o += "\\r"; break;
-      case '\0': o += "\\0"; break;
-      default: o += c; break;
-    }
+json to_json_value(const Value& v) {
+  if (const auto* p = std::get_if<int64_t>(&v)) return json(*p);
+  if (const auto* p = std::get_if<double>(&v)) {
+    if (!std::isfinite(*p)) return nullptr;
+    return json(*p);
   }
-  return o;
+  if (const auto* p = std::get_if<std::string>(&v)) return json(*p);
+  if (const auto* p = std::get_if<Vector>(&v)) {
+    json a = json::array();
+    for (float f : *p) {
+      if (!std::isfinite(f)) a.push_back(nullptr);
+      else a.push_back(f);
+    }
+    return a;
+  }
+  return nullptr;
 }
 
-std::string format_error(const DbError& e) {
-  return "ERROR " + std::to_string(e.code) + " (" + e.state + "): " +
-         e.message + "\n\n";
-}
-
-std::string format_result(const Result& r, const std::string& format) {
-  if (!r.is_query) {
-    return "Query OK, " + std::to_string(r.affected) + " row" +
-           (r.affected == 1 ? "" : "s") + " affected\n\n";
-  }
-
-  if (format == "mysql") {
-    std::vector<size_t> widths(r.columns.size(), 0);
-    for (size_t c = 0; c < r.columns.size(); ++c) {
-      widths[c] = r.columns[c].size();
-      for (const auto& row : r.rows) {
-        if (c < row.size()) widths[c] = std::max(widths[c], row[c].size());
-      }
-    }
-    std::ostringstream o;
-    auto line = [&]() {
-      o << '+';
-      for (size_t w : widths) o << std::string(w + 2, '-') << '+';
-      o << '\n';
-    };
-    line();
-    o << '|';
-    for (size_t c = 0; c < r.columns.size(); ++c) {
-      o << ' ' << r.columns[c]
-        << std::string(widths[c] - r.columns[c].size(), ' ') << " |";
-    }
-    o << '\n';
-    line();
+json response_for(const Result& r, const json& id) {
+  json resp;
+  resp["id"] = id;
+  resp["ok"] = true;
+  if (r.kind == ResultKind::Query) {
+    resp["columns"] = r.columns;
+    json rows = json::array();
     for (const auto& row : r.rows) {
-      o << '|';
-      for (size_t c = 0; c < r.columns.size(); ++c) {
-        std::string v = c < row.size() ? row[c] : "";
-        o << ' ' << v << std::string(widths[c] - v.size(), ' ') << " |";
-      }
-      o << '\n';
+      json jr = json::array();
+      for (const auto& v : row) jr.push_back(to_json_value(v));
+      rows.push_back(std::move(jr));
     }
-    line();
-    o << r.rows.size() << " row" << (r.rows.size() == 1 ? "" : "s")
-      << " in set\n\n";
-    return o.str();
+    resp["rows"] = std::move(rows);
+  } else if (r.kind == ResultKind::Modify) {
+    resp["affected_rows"] = r.affected;
   }
-
-  std::string o;
-  for (size_t c = 0; c < r.columns.size(); ++c) {
-    if (c) o += '\t';
-    o += escape_tsv(r.columns[c]);
-  }
-  o += '\n';
-  for (const auto& row : r.rows) {
-    for (size_t c = 0; c < row.size(); ++c) {
-      if (c) o += '\t';
-      o += escape_tsv(row[c]);
-    }
-    o += '\n';
-  }
-  o += '\n';
-  return o;
+  return resp;
 }
 
-void execute_one(Database& db, const std::string& sql, const std::string& format,
-                 Output& out) {
-  try {
-    Parser p(sql);
-    Statement st = p.parse();
-    Result r = db.execute(st);
-    out.enqueue(format_result(r, format));
-  } catch (const DbError& e) {
-    out.enqueue(format_error(e));
-  } catch (const std::bad_variant_access&) {
-    out.enqueue(format_error(DbError(1105, "internal type error")));
-  } catch (const std::exception& e) {
-    out.enqueue(format_error(DbError(1105, e.what())));
-  }
+void emit(const json& j) {
+  std::cout << j.dump() << '\n';
+  std::cout.flush();
+}
+
+json error_response(const json& id, const std::string& code,
+                    const std::string& message) {
+  json err;
+  err["code"] = code;
+  err["message"] = message;
+  json resp;
+  resp["id"] = id;
+  resp["ok"] = false;
+  resp["error"] = err;
+  return resp;
 }
 
 }  // namespace
@@ -256,9 +105,6 @@ int main(int argc, char** argv) {
   std::cin.tie(nullptr);
 
   std::string data_dir = "/data";
-  std::string ready = "READY";
-  std::string mode = "exact";
-  std::string format = "tsv";
   size_t cache_mb = 64;
   bool no_heap = false;
 
@@ -272,15 +118,10 @@ int main(int argc, char** argv) {
       return argv[++i];
     };
     if (a == "--data") data_dir = next("--data");
-    else if (a == "--ready") ready = next("--ready");
-    else if (a == "--mode") mode = next("--mode");
-    else if (a == "--format") format = next("--format");
     else if (a == "--cache-mb") cache_mb = static_cast<size_t>(std::stoull(next("--cache-mb")));
     else if (a == "--no-heap") no_heap = true;
     else if (a == "--help" || a == "-h") {
-      std::cerr << "usage: minivectordb [--data DIR] [--ready TEXT] "
-                   "[--mode exact|ann] [--format tsv|mysql] [--cache-mb N] "
-                   "[--no-heap]\n";
+      std::cerr << "usage: minivectordb [--data DIR] [--cache-mb N] [--no-heap]\n";
       return 0;
     } else {
       std::cerr << "unknown argument: " << a << "\n";
@@ -288,9 +129,6 @@ int main(int argc, char** argv) {
     }
   }
   if (const char* e = std::getenv("MVDB_DATA")) data_dir = e;
-  if (const char* e = std::getenv("MVDB_READY")) ready = e;
-  if (const char* e = std::getenv("MVDB_MODE")) mode = e;
-  if (const char* e = std::getenv("MVDB_FORMAT")) format = e;
   if (const char* e = std::getenv("MVDB_CACHE_MB")) {
     cache_mb = static_cast<size_t>(std::strtoull(e, nullptr, 10));
   }
@@ -298,77 +136,62 @@ int main(int argc, char** argv) {
     no_heap = (std::string(e) != "0");
   }
 
-  struct sigaction sa {};
-  sa.sa_handler = on_signal;
-  sigemptyset(&sa.sa_mask);
-  sa.sa_flags = 0;  // no SA_RESTART: interrupt a blocking getline
-  sigaction(SIGINT, &sa, nullptr);
-  sigaction(SIGTERM, &sa, nullptr);
-
-  Output out;
   try {
     Database db(data_dir, cache_mb);
     if (no_heap) db.set_heap_enabled(false);
-    if (mode == "ann") {
-      SetStmt s;
-      s.name = "vector_mode";
-      s.value = "ann";
-      db.execute(s);
-    }
 
-    out.enqueue(ready + "\n");
+    // STDIO_PROTOCOL.md: exactly this object, one line, before any request.
+    std::cout << "{\"type\":\"ready\"}\n";
+    std::cout.flush();
 
-    StatementReader reader;
-    std::vector<std::string> stmts;
-    struct pollfd pfd {};
-    pfd.fd = 0;
-    pfd.events = POLLIN;
-    while (!g_stop) {
-      int pr = ::poll(&pfd, 1, 200);
-      if (pr < 0) {
-        if (errno == EINTR) continue;
-        break;
+    std::string line;
+    while (std::getline(std::cin, line)) {
+      if (line.empty()) continue;
+      json req;
+      try {
+        req = json::parse(line);
+      } catch (const std::exception& e) {
+        std::cerr << "invalid JSON request: " << e.what() << "\n";
+        continue;
       }
-      if (pr == 0) continue;
-      char buf[65536];
-      ssize_t n = ::read(0, buf, sizeof(buf));
-      if (n < 0) {
-        if (errno == EINTR) continue;
-        break;
+      if (!req.is_object()) {
+        std::cerr << "request is not an object\n";
+        continue;
       }
-      if (n == 0) break;
-      reader.feed(std::string(buf, static_cast<size_t>(n)), stmts);
-      for (auto& s : stmts) {
-        if (is_quit_statement(s)) {
-          g_stop = 1;
-          break;
-        }
-        execute_one(db, s, format, out);
-      }
-      stmts.clear();
-      if (!g_stop && is_quit_statement(reader.pending_trimmed())) {
-        g_stop = 1;
-      }
-    }
+      json id = req.contains("id") ? req["id"] : json(nullptr);
+      const std::string op = req.value("op", "");
 
-    if (!g_stop) {
-      reader.finish(stmts);
-      for (auto& s : stmts) {
-        if (is_quit_statement(s)) break;
-        execute_one(db, s, format, out);
+      if (op == "shutdown") {
+        db.shutdown();
+        json resp;
+        resp["id"] = id;
+        resp["ok"] = true;
+        emit(resp);
+        return 0;
+      }
+
+      if (op != "execute") {
+        emit(error_response(id, "unsupported_op", "unsupported operation"));
+        continue;
+      }
+
+      const std::string sql = req.value("sql", "");
+      try {
+        Parser p(sql);
+        Statement st = p.parse();
+        Result r = db.execute(st);
+        emit(response_for(r, id));
+      } catch (const DbError& e) {
+        emit(error_response(id, semantic_code(e), e.message));
+      } catch (const std::exception& e) {
+        emit(error_response(id, "internal_error", e.what()));
       }
     }
 
     db.shutdown();
-    out.finish();
-  } catch (const DbError& e) {
-    out.enqueue(format_error(e));
-    out.finish();
-    return 1;
+    return 0;
   } catch (const std::exception& e) {
-    out.enqueue(format_error(DbError(1105, e.what())));
-    out.finish();
+    std::cerr << "fatal: " << e.what() << "\n";
     return 1;
   }
-  return 0;
 }

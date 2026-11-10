@@ -57,7 +57,7 @@ struct TableSchema {
 // Values
 // ---------------------------------------------------------------------------
 using Vector = std::vector<float>;
-using Value = std::variant<std::monostate, int64_t, std::string, Vector>;
+using Value = std::variant<std::monostate, int64_t, double, std::string, Vector>;
 
 inline bool is_null(const Value& v) {
   return std::holds_alternative<std::monostate>(v);
@@ -157,6 +157,7 @@ inline std::string format_float_compact(double v) {
 inline std::string format_value(const Value& v) {
   if (std::holds_alternative<std::monostate>(v)) return "NULL";
   if (const auto* p = std::get_if<int64_t>(&v)) return std::to_string(*p);
+  if (const auto* p = std::get_if<double>(&v)) return format_float_compact(*p);
   if (const auto* p = std::get_if<std::string>(&v)) return *p;
   const auto& vec = std::get<Vector>(v);
   std::string out = "[";

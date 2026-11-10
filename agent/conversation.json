@@ -4,12 +4,13 @@
     "project": "2026 OceanBase 加赛 · MiniVectorDB",
     "source": "ZCode 真实会话节选（2026-11-09）",
     "synthetic": false,
-    "note": "本文件是完整会话时间线 + 实验证据；Agent 条目为回答摘要，实际输出在 experiments；学生原话保留。"
+    "note": "本文件是完整会话时间线 + 实验证据；Agent 条目为回答摘要，实际输出在 experiments；学生原话保留；最终版本按官方 JSONL 协议与公开题包验证。"
   },
   "context": {
     "task": "实现 MiniVectorDB：一套支持基础 SQL、向量检索、持久化存储、事务与崩溃恢复的轻量数据库。本题加赛满分 80 分，初赛已得分不受影响。",
     "environment": "Windows + WSL Ubuntu 26.04；C++20；Docker 29.1.3；本地测试。",
-    "material_note": "本文件同时放在 agent/conversation.json 与仓库根 conversation.json，内容一致。"
+    "material_note": "本文件同时放在 agent/conversation.json 与仓库根 conversation.json，内容一致。",
+    "protocol": "STDIO_PROTOCOL.md: JSONL ready/execute/shutdown; response id/ok/columns/rows/affected_rows/error"
   },
   "student_profile": {
     "self_report": "此前不会读 SQL；本次从 WHERE/ORDER BY/LIMIT 开始学。"
@@ -242,6 +243,17 @@
       "role": "agent",
       "content": "确认之前材料过简；扩写为完整时间线，保留原话与输出。",
       "note": "Agent 回答摘要"
+    },
+    {
+      "id": "u22",
+      "role": "student",
+      "content": "你看看有没有新的东西出现，因为主办方其实有很多东西都是仓促准备的，可能出现信息一点一点出现的情况"
+    },
+    {
+      "id": "a22",
+      "role": "agent",
+      "content": "复查发现官方分支从 c842a368 前进到 f4d4e26：新增 mysqltest/（20 个公开用例、95 条 SQL）、protocol_check/ 和 STDIO_PROTOCOL.md。正式协议是 JSONL（ready/execute/shutdown、id/ok/columns/rows/affected_rows/error），纯文本 READY、直接 SQL、文本表格都不符合；已按新协议重写并跑公开自测。",
+      "note": "Agent 回答摘要"
     }
   ],
   "experiments": [
@@ -271,7 +283,8 @@
         "u13"
       ],
       "student_evidence_pointer": "/conversations/17/content",
-      "result_evidence_pointer": "/experiments/0/result_evidence"
+      "result_evidence_pointer": "/experiments/0/result_evidence",
+      "transport_note": "实验输出通过本地文本调试接口采集；最终版本已按官方 JSONL 协议重写，SQL 语义与结果一致；公开 vector_ties_and_filter 用例通过。"
     },
     {
       "id": "e2",
@@ -285,13 +298,14 @@
         "1.都选全排，除非超时\n2.选堆",
         "1.堆\n2.如实解释，写的快；选堆就是看性能"
       ],
-      "result_evidence": "query: 1000 top-10 queries -> 0.835 s, 12000 output lines\nquery peak RSS: 12.6 MiB",
+      "result_evidence": "query: 1000 top-10 -> 1.615 s\nquery peak RSS: 13.3 MiB",
       "result_supporting": [
-        "query: 1000 top-10 queries -> 3.783 s, 12000 output lines\nquery peak RSS: 20.1 MiB",
-        "heap time 0.254 rss_mb 13.1 lines 55200 rc 0",
-        "no-heap time 0.509 rss_mb 20.0 lines 55200 rc 0"
+        "query: 1000 top-10 -> 5.697 s",
+        "query peak RSS: 20.1 MiB",
+        "query: 100 top-1000 -> 0.378 s",
+        "query: 100 top-1000 -> 0.643 s"
       ],
-      "agent_note": "全排序 O(n log n)，堆 O(n log K)；K=10 时 log 比约 4，K=1000 时约 1.3，实测 4.5 倍 / 2.0 倍。代码用 std::sort 与 std::push_heap；若完全手搓，K 小时最简的是 K 格线性扫描，K 大才需要堆。学生在代码对比后把竞赛选择从“全排优先”改为“堆，保性能”。",
+      "agent_note": "全排序 O(n log n)，堆 O(n log K)；JSONL 实测 K=10 约 3.5 倍，K=1000 约 1.7 倍。代码用 std::sort 与 std::push_heap；若完全手搓，K 小时最简的是 K 格线性扫描，K 大才需要堆。学生在代码对比后把竞赛选择从“全排优先”改为“堆，保性能”。",
       "dimension_hint": "实验与反馈迭代 / 技术理解与迁移",
       "conversation_refs": [
         "u14",
@@ -303,7 +317,8 @@
         "u20"
       ],
       "student_evidence_pointer": "/conversations/27/content",
-      "result_evidence_pointer": "/experiments/1/result_evidence"
+      "result_evidence_pointer": "/experiments/1/result_evidence",
+      "transport_note": "最终版本按官方 JSONL 协议测量；K=10 用 1000 次查询，K=1000 用 100 次查询。"
     }
   ],
   "implementation": [
@@ -334,19 +349,37 @@
       "agent_action": "确认材料过简；扩写为完整时间线，保留原话与输出。",
       "result": "conversation.json 扩展为完整时间线（本文件）。",
       "dimension_hint": "独立验证与质疑"
+    },
+    {
+      "id": "i4",
+      "title": "主办方增量发布 JSONL 协议后重写协议层",
+      "student_prompt": "你看看有没有新的东西出现，因为主办方其实有很多东西都是仓促准备的，可能出现信息一点一点出现的情况",
+      "student_prompt_pointer": "/conversations/41/content",
+      "agent_action": "合并官方 f4d4e26（mysqltest/、protocol_check/、STDIO_PROTOCOL.md）；把 stdout 协议从纯文本改为 JSONL；响应按 columns/rows/affected_rows/error 返回，BIGINT/浮点/字符串/向量保持 JSON 原生类型；修复运行时新建表的缓存初始化。",
+      "result_evidence": "sql_crud: PASS",
+      "result_supporting": [
+        "handshake: PASS",
+        "vector_ties_and_filter: PASS",
+        "transaction_failed_insert: PASS",
+        "transaction_shutdown_rollback: PASS",
+        "20/20 public cases PASS (local --command)",
+        "20/20 public cases PASS (Docker image)"
+      ],
+      "result": "官方 protocol_check：handshake PASS；公开 20/20 PASS（本地 --command 与 Docker 镜像各一遍）。",
+      "dimension_hint": "独立验证与质疑 / 问题理解与自主拆解"
     }
   ],
   "retrospective": {
     "author": "agent",
-    "summary": "学生从不会读 SQL 开始，通过“预测→实测→解释→反例→复测”完成了过滤 TopK 的修正链；在堆/排序上先给出 n!/n 的复杂度，经 K=10 与 K=1000 实测修正为 O(n log n)/O(n log K)，并最终在“代码简单”与“性能”之间选择堆。"
+    "summary": "学生从不会读 SQL 开始，通过“预测→实测→解释→反例→复测”完成了过滤 TopK 的修正链；在堆/排序上先给出 n!/n 的复杂度，经 K=10 与 K=1000 实测修正为 O(n log n)/O(n log K)，并最终在“代码简单”与“性能”之间选择堆。主办方增量发布 JSONL 协议后，学生要求复查，发现纯文本协议不符合正式协议，协议层重写并通过 20/20 公开用例。"
   },
   "limitations": {
     "author": "agent",
     "items": [
-      "题包/驱动未提供：READY、TSV、Query OK、错误文案是按题面的约定，协议层可配置。",
+      "官方 STDIO_PROTOCOL.md（JSONL）与公开 20 用例已落地并通过（handshake + 20/20，本地与 Docker）；正式 29 例及隐藏数据不可见。",
       "ANN 物理索引未实现：ann 走精确扫描，召回 1.0，但大数据查询不如专用索引。",
       "PK 映射常驻内存；更新追加版本、无 compaction；DDL 在显式事务内返回 1105。",
-      "本地性能是 WSL 的 /usr/bin/time 与自建负载，不是平台 cgroup 口径。"
+      "本地性能是 WSL + JSONL 驱动，不是平台 cgroup 口径。"
     ]
   },
   "timeline_note": "按会话顺序；学生消息保留原话；Agent 消息是回答摘要；实际工具输出在 experiments。"

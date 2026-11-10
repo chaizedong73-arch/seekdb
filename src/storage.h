@@ -566,6 +566,13 @@ class TableData {
     build_cache();
   }
 
+  void init_empty_cache() {
+    if (!cache_valid_ && cache_.empty()) {
+      cache_valid_ = true;
+      cache_bytes_ = 0;
+    }
+  }
+
   void begin(uint64_t txn_id) {
     active_txn_ = txn_id;
     pending_.clear();
@@ -629,6 +636,7 @@ class TableData {
         if (pv.meta.deleted) {
           if (it != cache_index_.end()) {
             uint32_t pos = it->second;
+            cache_bytes_ -= row_memory_bytes(cache_[pos]);
             uint32_t last = static_cast<uint32_t>(cache_.size() - 1);
             if (pos != last) {
               cache_[pos] = std::move(cache_[last]);
@@ -641,14 +649,26 @@ class TableData {
           }
         } else {
           if (it != cache_index_.end()) {
+            size_t oldb = row_memory_bytes(cache_[it->second]);
+            size_t newb = row_memory_bytes(pv.row);
+            if (newb >= oldb) cache_bytes_ += newb - oldb;
+            else cache_bytes_ -= oldb - newb;
             cache_[it->second] = pv.row;
           } else {
+            cache_bytes_ += row_memory_bytes(pv.row);
             cache_index_[pk] = static_cast<uint32_t>(cache_.size());
             cache_pks_.push_back(pk);
             cache_.push_back(pv.row);
           }
         }
       }
+    }
+    if (cache_valid_ && cache_bytes_ > cache_limit_) {
+      cache_.clear();
+      cache_pks_.clear();
+      cache_index_.clear();
+      cache_valid_ = false;
+      cache_bytes_ = 0;
     }
     pending_.clear();
     pending_latest_.clear();
@@ -771,6 +791,7 @@ class TableData {
   uint64_t valid_end_ = 0;
   size_t cache_limit_ = 64ull * 1024 * 1024;
   bool cache_valid_ = false;
+  size_t cache_bytes_ = 0;
   std::vector<Row> cache_;
   std::vector<int64_t> cache_pks_;
   std::unordered_map<int64_t, uint32_t> cache_index_;
@@ -797,12 +818,14 @@ class TableData {
         cache_.clear();
         cache_pks_.clear();
         cache_index_.clear();
+        cache_bytes_ = 0;
         return;
       }
       cache_index_[pk] = static_cast<uint32_t>(cache_.size());
       cache_pks_.push_back(pk);
       cache_.push_back(std::move(r));
     }
+    cache_bytes_ = bytes;
     cache_valid_ = true;
   }
 };

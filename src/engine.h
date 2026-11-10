@@ -18,10 +18,12 @@
 
 namespace mvdb {
 
+enum class ResultKind { Ok, Query, Modify };
+
 struct Result {
-  bool is_query = false;
+  ResultKind kind = ResultKind::Ok;
   std::vector<std::string> columns;
-  std::vector<std::vector<std::string>> rows;
+  std::vector<std::vector<Value>> rows;
   int64_t affected = 0;
 };
 
@@ -44,6 +46,9 @@ inline bool value_equal(const Value& a, const Value& b) {
   if (a.index() != b.index()) return false;
   if (const auto* p = std::get_if<int64_t>(&a)) {
     return *p == std::get<int64_t>(b);
+  }
+  if (const auto* p = std::get_if<double>(&a)) {
+    return *p == std::get<double>(b);
   }
   if (const auto* p = std::get_if<std::string>(&a)) {
     return *p == std::get<std::string>(b);
@@ -497,8 +502,11 @@ class Database {
     }
     TableEntry& e = catalog_.create(st.schema);
     catalog_.save();
-    tables_[e.id] =
-        std::make_unique<TableData>(dir_, e.id, e.schema, cache_limit_);
+    {
+      auto td = std::make_unique<TableData>(dir_, e.id, e.schema, cache_limit_);
+      td->init_empty_cache();
+      tables_[e.id] = std::move(td);
+    }
     return Result{};
   }
 
@@ -544,13 +552,13 @@ class Database {
 
   Result exec_show(const ShowStmt& st) {
     Result r;
-    r.is_query = true;
+    r.kind = ResultKind::Query;
     if (st.kind == ShowStmt::Kind::Tables) {
       r.columns = {"Tables"};
       std::vector<std::string> names;
       for (const auto& e : catalog_.tables()) names.push_back(e.schema.name);
       std::sort(names.begin(), names.end());
-      for (const auto& n : names) r.rows.push_back({n});
+      for (const auto& n : names) r.rows.push_back({Value(n)});
       return r;
     }
     TableEntry* e = catalog_.find(st.table);
@@ -565,7 +573,9 @@ class Database {
         case ColType::Varchar: type = "varchar(" + std::to_string(c.len) + ")"; break;
         case ColType::Vector: type = "vector(" + std::to_string(c.len) + ")"; break;
       }
-      r.rows.push_back({c.name, type, "NO", c.primary ? "PRI" : "", "NULL", ""});
+      r.rows.push_back({Value(c.name), Value(type), Value(std::string("NO")),
+                        Value(c.primary ? std::string("PRI") : std::string()),
+                        Value(std::string("NULL")), Value(std::string())});
     }
     return r;
   }
@@ -644,6 +654,7 @@ class Database {
       throw;
     }
     Result res;
+    res.kind = ResultKind::Modify;
     res.affected = static_cast<int64_t>(rows.size());
     return res;
   }
@@ -697,6 +708,7 @@ class Database {
       throw;
     }
     Result res;
+    res.kind = ResultKind::Modify;
     res.affected = changed;
     return res;
   }
@@ -725,6 +737,7 @@ class Database {
       throw;
     }
     Result res;
+    res.kind = ResultKind::Modify;
     res.affected = static_cast<int64_t>(pks.size());
     return res;
   }
@@ -805,19 +818,18 @@ class Database {
     return k;
   }
 
-  std::string eval_string(const Expr& e, const Row& row,
-                          const TableSchema& schema) {
+  Value eval_value(const Expr& e, const Row& row,
+                   const TableSchema& schema) {
     switch (e.kind) {
-      case ExprKind::Column: {
-        int ci = column_index(schema, e.text);
-        return format_value(row[ci]);
-      }
+      case ExprKind::Column:
+        return row[column_index(schema, e.text)];
       case ExprKind::Number:
-        return e.is_integer ? std::to_string(e.inum) : format_float_compact(e.num);
+        if (e.is_integer) return static_cast<int64_t>(e.inum);
+        return e.num;
       case ExprKind::String:
         return std::get<std::string>(e.value);
       case ExprKind::Vector:
-        return format_value(e.value);
+        return e.value;
       case ExprKind::L2Distance: {
         int ci = column_index(schema, e.args[0]->text);
         if (schema.columns[ci].type != ColType::Vector) {
@@ -827,10 +839,10 @@ class Database {
         if (static_cast<int>(v.size()) != schema.columns[ci].len) {
           throw DbError(1366, "Vector dimension mismatch", "22007");
         }
-        return format_float(l2_distance(value_vec(row[ci]), v));
+        return l2_distance(value_vec(row[ci]), v);
       }
     }
-    return {};
+    return Value{};
   }
 
   Result exec_select(const SelectStmt& st) {
@@ -842,17 +854,17 @@ class Database {
         throw DbError(1064, "WHERE/ORDER BY requires FROM", "42000");
       }
       Result r;
-      r.is_query = true;
+      r.kind = ResultKind::Query;
       for (const auto& it : st.items) {
         r.columns.push_back(it.alias.empty() ? it.expr->text : it.alias);
       }
       if (!st.has_limit || st.limit > 0) {
         TableSchema empty_schema;
         Row empty;
-        std::vector<std::string> out;
+        std::vector<Value> out;
         out.reserve(st.items.size());
         for (const auto& it : st.items) {
-          out.push_back(eval_string(*it.expr, empty, empty_schema));
+          out.push_back(eval_value(*it.expr, empty, empty_schema));
         }
         r.rows.push_back(std::move(out));
       }
@@ -929,24 +941,21 @@ class Database {
     }
 
     Result r;
-    r.is_query = true;
+    r.kind = ResultKind::Query;
     if (st.star) {
       for (const auto& c : schema.columns) r.columns.push_back(c.name);
       for (size_t i = start; i < end; ++i) {
-        std::vector<std::string> out;
-        out.reserve(cands[i].row.size());
-        for (const auto& v : cands[i].row) out.push_back(format_value(v));
-        r.rows.push_back(std::move(out));
+        r.rows.push_back(cands[i].row);
       }
     } else {
       for (const auto& it : st.items) {
         r.columns.push_back(it.alias.empty() ? it.expr->text : it.alias);
       }
       for (size_t i = start; i < end; ++i) {
-        std::vector<std::string> out;
+        std::vector<Value> out;
         out.reserve(st.items.size());
         for (const auto& it : st.items) {
-          out.push_back(eval_string(*it.expr, cands[i].row, schema));
+          out.push_back(eval_value(*it.expr, cands[i].row, schema));
         }
         r.rows.push_back(std::move(out));
       }
